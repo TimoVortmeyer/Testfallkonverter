@@ -1,0 +1,48 @@
+{
+  "id": "lunar_standard_v1",
+  "name": "Standard-Testfall mit Systemspalte (LUNAR und EDDI)",
+  "required_markers": [
+    "Testablauf",
+    "Kurzbeschreibung"
+  ],
+  "step_table": {
+    "required_columns": [
+      "System / Komponente",
+      "Beschreibung des Testschritts",
+      "Erwartete Ergebnisse"
+    ]
+  },
+  "info_table": {
+    "required_labels": [
+      "Kurzbeschreibung"
+    ]
+  },
+  "field_aliases": {
+    "testfallname": [
+      "Testfall",
+      "Testfallname"
+    ],
+    "schritt_nummer": [
+      "Schritt-Nr.",
+      "Schritt Nr.",
+      "Schrittnummer"
+    ],
+    "system": [
+      "System / Komponente",
+      "System/Komponente",
+      "System / Transaktion",
+      "System/Transaktion"
+    ],
+    "action": [
+      "Beschreibung des Testschritts"
+    ],
+    "expected_result": [
+      "Erwartete Ergebnisse",
+      "Erwartetes Ergebnis"
+    ],
+    "actual_result": [
+      "Tatsächliche Ergebnisse",
+      "Tatsächliches Ergebnis"
+    ]
+  }
+}

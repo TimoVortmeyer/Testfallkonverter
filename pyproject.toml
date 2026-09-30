@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lunar-testcase-converter"
+version = "0.2.0"
+description = "Batch-Konverter für LUNAR-Testdokumente (.docx/.doc) in Jira/Xray-Import-JSON"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "python-docx>=1.1.0",
+  "Pillow>=10.0.0",
+  "jsonschema>=4.0.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+lunar_converter = ["resources/*.ps1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-ra"

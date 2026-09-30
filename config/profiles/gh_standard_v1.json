@@ -1,0 +1,43 @@
+{
+  "id": "gh_standard_v1",
+  "name": "GH-Vorlage mit Geschäftsvorfall und Varianten (ohne Systemspalte)",
+  "required_markers": [
+    "Testablauf",
+    "Geschäftsvorfall"
+  ],
+  "step_table": {
+    "required_columns": [
+      "Geschäftsprozess-Schritte",
+      "Eingabedaten / besondere Angaben",
+      "Ausgabedaten / erwartetes Ergebnis"
+    ]
+  },
+  "info_table": {
+    "required_labels": [
+      "Geschäftsvorfall"
+    ]
+  },
+  "field_aliases": {
+    "testfallname": [
+      "Testfall",
+      "Testfallname"
+    ],
+    "schritt_nummer": [
+      "Schritt Nr.",
+      "Schritt-Nr.",
+      "Schrittnummer"
+    ],
+    "action": [
+      "Geschäftsprozess-Schritte",
+      "Geschäftsprozessschritte"
+    ],
+    "data": [
+      "Eingabedaten / besondere Angaben",
+      "Eingabedaten"
+    ],
+    "expected_result": [
+      "Ausgabedaten / erwartetes Ergebnis",
+      "Erwartetes Ergebnis"
+    ]
+  }
+}

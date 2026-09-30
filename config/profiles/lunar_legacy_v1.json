@@ -1,0 +1,48 @@
+{
+  "id": "lunar_legacy_v1",
+  "name": "Ältere Vorlage mit Eingabedaten, ohne Systemspalte",
+  "required_markers": [
+    "Testablauf"
+  ],
+  "step_table": {
+    "required_columns": [
+      "Schritt-Nr.",
+      "Beschreibung des Testschritts",
+      "Eingabedaten",
+      "Erwartete Ergebnisse / Ausgabedaten"
+    ]
+  },
+  "info_table": {
+    "required_labels": [
+      "Beschreibung"
+    ]
+  },
+  "field_aliases": {
+    "testfallname": [
+      "Testfall",
+      "Testfallname"
+    ],
+    "schritt_nummer": [
+      "Schritt-Nr.",
+      "Schritt Nr.",
+      "Schrittnummer"
+    ],
+    "action": [
+      "Beschreibung des Testschritts"
+    ],
+    "data": [
+      "Eingabedaten",
+      "Eingabedaten (ggf. besondere Angaben)"
+    ],
+    "expected_result": [
+      "Erwartete Ergebnisse / Ausgabedaten",
+      "Erwartete Ergebnisse / Ausgabe",
+      "Erwartete Ergebnisse",
+      "Erwartetes Ergebnis"
+    ],
+    "actual_result": [
+      "Tatsächliche Ergebnisse",
+      "Tatsächliches Ergebnis"
+    ]
+  }
+}
