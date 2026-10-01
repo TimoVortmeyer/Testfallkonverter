@@ -116,6 +116,28 @@ Voraussetzung: Python 3.11 oder neuer.
 
 ## 6. CLI
 
+### Profile vorab prüfen
+
+Der Preflight prüft rekursiv alle `.docx`- und `.doc`-Dateien gegen alle Profile
+und schreibt pro Datei Status, Treffer, Prüfgründe und Fehler in eine CSV:
+
+Es wird empfohlen, den Preflight vor der eigentlichen Konvertierung auszuführen.
+So lassen sich fehlende oder mehrdeutige Profilzuordnungen früh erkennen und
+klären.
+
+```powershell
+python -m lunar_converter preflight `
+  --input-dir .\input `
+  --csv-path .\output\profile-preflight.csv
+```
+
+Eine Vorabkonvertierung ist nicht nötig. `.docx` wird direkt gelesen; `.doc`
+wird temporär mit Microsoft Word nach `.docx` konvertiert. Der Preflight ändert
+die Quelldateien nicht und erzeugt keine Testfall-Exports. Exit-Code `0` bedeutet,
+dass für jede Datei genau ein Profil passt; `1` bedeutet mindestens einen
+fehlenden/mehrdeutigen Treffer oder Dateifehler. Die CSV ist UTF-8 mit BOM und
+Semikolon als Trennzeichen.
+
 ```powershell
 python -m lunar_converter convert `
   --input-dir .\input `

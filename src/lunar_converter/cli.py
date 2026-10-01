@@ -9,6 +9,7 @@ from pathlib import Path
 from .conversion_service import ConversionOptions, run_conversion
 from .exceptions import LunarConverterError
 from .logging_setup import configure_logging, shutdown_logging
+from .preflight import run_preflight
 
 EXIT_OK = 0
 EXIT_FILE_ERRORS = 1
@@ -62,11 +63,38 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("--fail-fast", action="store_true", help="Beim ersten Dateifehler abbrechen.")
     convert.add_argument("--schema-path", type=Path, default=None, help="JSON-Schema (Standard: schema/testcase.schema.json).")
     convert.add_argument("--config-dir", type=Path, default=None, help="Konfigurationsordner mit profiles/ (Standard: config/).")
+
+    preflight = subparsers.add_parser(
+        "preflight",
+        help="Prüft alle Word-Dateien auf passende Profile und schreibt einen CSV-Bericht.",
+        description=(
+            "Prüft alle .docx- und .doc-Dateien einschließlich Unterordner gegen alle vorhandenen Profile. "
+            ".doc-Dateien werden temporär mit Microsoft Word konvertiert. Es werden keine testcase.json- oder "
+            "Screenshot-Dateien erzeugt. Exit-Codes: 0 = jedes Dokument hat genau einen Profiltreffer, "
+            "1 = mindestens ein Dokument hat keinen oder mehrere Profiltreffer oder einen Dateifehler, "
+            "2 = globaler Fehler."
+        ),
+    )
+    preflight.add_argument("--input-dir", required=True, type=Path, help="Ordner mit .docx-/.doc-Dateien (inkl. Unterordner).")
+    preflight.add_argument("--csv-path", required=True, type=Path, help="Zielpfad für den CSV-Bericht.")
+    preflight.add_argument("--config-dir", type=Path, default=None, help="Profilordner (Standard: config/).")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "preflight":
+        try:
+            total, failed = run_preflight(args.input_dir, args.csv_path, args.config_dir or _default_path("config"))
+        except LunarConverterError as exc:
+            print(f"Preflight abgebrochen ({exc.code}): {exc.message}", file=sys.stderr)
+            if exc.details:
+                print(exc.details, file=sys.stderr)
+            return EXIT_GLOBAL_ERROR
+        print(f"Preflight: {total} Datei(en), {total - failed} eindeutig erkannt, {failed} ohne eindeutigen Treffer.")
+        print(f"CSV: {args.csv_path}")
+        return EXIT_FILE_ERRORS if failed else EXIT_OK
+
     logger = configure_logging(args.log_level)
     options = ConversionOptions(
         input_dir=args.input_dir,
