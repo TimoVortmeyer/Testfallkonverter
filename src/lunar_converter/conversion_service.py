@@ -26,7 +26,7 @@ from .models import Issue, ProfileDefinition
 from .profile_detector import DetectionResult, detect_profile
 from .profile_loader import load_profiles
 from .reporting import BatchReport, FileReport, now_iso, write_report
-from .source_discovery import discover_source_files
+from .source_discovery import discover_source_files, relative_display_path
 from .target_renderer import XrayImportRenderer, write_testcase_json
 from .validator import load_schema, validate_payload
 
@@ -66,24 +66,27 @@ def run_conversion(options: ConversionOptions, logger: logging.Logger) -> BatchR
     )
     converter = _FileConverter(options, profiles, schema, logger)
     try:
-        files = discover_source_files(options.input_dir)
+        files = discover_source_files(options.input_dir, exclude_dir=options.output_dir)
         logger.info(
-            "Start der Konvertierung: %d Datei(en) in '%s', Profile: %s%s.",
+            "Start der Konvertierung: %d Datei(en) in '%s' (inkl. Unterordner), Profile: %s%s.",
             len(files),
             options.input_dir,
             ", ".join(profile.id for profile in profiles),
             " (Dry Run)" if options.dry_run else "",
         )
         if not files:
-            logger.warning("Im Eingabeordner wurden keine .docx- oder .doc-Dateien gefunden.")
-        used_folder_names: set[str] = set()
+            logger.warning("Im Eingabeordner und seinen Unterordnern wurden keine .docx- oder .doc-Dateien gefunden.")
+        # Ordnername (casefold) -> Quelldatei, die ihn belegt; der Output bleibt flach.
+        used_folder_names: dict[str, str] = {}
         for position, source in enumerate(files):
             file_report = converter.convert(source, used_folder_names)
             report.files.append(file_report)
             if file_report.status == "failed" and options.fail_fast:
                 for remaining in files[position + 1 :]:
                     report.files.append(_skipped_report(remaining))
-                    context_logger(logger, remaining.name).warning("Übersprungen wegen --fail-fast.")
+                    context_logger(logger, relative_display_path(remaining, options.input_dir)).warning(
+                        "Übersprungen wegen --fail-fast."
+                    )
                 logger.error("Abbruch nach erstem Dateifehler (--fail-fast).")
                 break
     finally:
@@ -132,9 +135,9 @@ class _FileConverter:
         self._logger = logger
         self._renderer = XrayImportRenderer()
 
-    def convert(self, source: Path, used_folder_names: set[str]) -> FileReport:
+    def convert(self, source: Path, used_folder_names: dict[str, str]) -> FileReport:
         report = FileReport(input_file=str(source))
-        context_logger(self._logger, source.name).info("Verarbeitung gestartet.")
+        context_logger(self._logger, self._label(source)).info("Verarbeitung gestartet.")
         try:
             with tempfile.TemporaryDirectory(prefix="lunar_", ignore_cleanup_errors=True) as temp:
                 self._convert(source, Path(temp), report, used_folder_names)
@@ -150,8 +153,11 @@ class _FileConverter:
             self._fail(report, source, [issue])
         return report
 
-    def _convert(self, source: Path, work_dir: Path, report: FileReport, used_folder_names: set[str]) -> None:
-        log = context_logger(self._logger, source.name)
+    def _label(self, source: Path) -> str:
+        return relative_display_path(source, self._options.input_dir)
+
+    def _convert(self, source: Path, work_dir: Path, report: FileReport, used_folder_names: dict[str, str]) -> None:
+        log = context_logger(self._logger, self._label(source))
         docx_path = source
         if source.suffix.lower() == ".doc":
             docx_path = convert_doc_to_docx(source, work_dir / "doc-konvertierung")
@@ -171,14 +177,15 @@ class _FileConverter:
             log.debug("Profilprüfung '%s': %s – %s", check.profile, "passt" if check.matched else "passt nicht", " ".join(check.reasons))
         profile = _require_single_profile(detection)
         report.detected_profile = profile.id
-        log = context_logger(self._logger, source.name, profile.id)
+        log = context_logger(self._logger, self._label(source), profile.id)
         log.info("Profil erkannt: %s (%s).", profile.id, profile.name)
 
         test_case = parse_test_case(document, profile)
         folder_name = sanitize_folder_name(source.stem)
         if folder_name.casefold() in used_folder_names:
             raise ExportError(
-                f"Der Ordnername '{folder_name}' wird in diesem Lauf bereits von einer anderen Quelldatei verwendet.",
+                f"Der Ordnername '{folder_name}' wird in diesem Lauf bereits von "
+                f"'{used_folder_names[folder_name.casefold()]}' verwendet (gleicher Dateiname, ggf. in anderem Unterordner).",
                 code="output_name_conflict",
             )
 
@@ -214,7 +221,7 @@ class _FileConverter:
                 len(payload["steps"]),
                 len(exported.exported),
             )
-        used_folder_names.add(folder_name.casefold())
+        used_folder_names[folder_name.casefold()] = self._label(source)
         report.step_count = len(payload["steps"])
         report.exported_image_count = len(exported.exported)
 
@@ -223,7 +230,7 @@ class _FileConverter:
         report.output_directory = None
         report.planned_output_directory = None
         report.errors.extend(issues)
-        log: ContextLogger = context_logger(self._logger, source.name, report.detected_profile)
+        log: ContextLogger = context_logger(self._logger, self._label(source), report.detected_profile)
         for issue in issues:
             lines = [f"Datei: {source}", f"Profil: {report.detected_profile or '-'}", f"Fehler: {issue.code}"]
             if issue.field:

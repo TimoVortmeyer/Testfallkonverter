@@ -6,7 +6,7 @@ import pytest
 
 from lunar_converter.exceptions import OutputDirectoryError
 from lunar_converter.filesystem import prepare_output_directory, publish_directory, sanitize_folder_name
-from lunar_converter.source_discovery import discover_source_files
+from lunar_converter.source_discovery import discover_source_files, relative_display_path
 
 
 @pytest.mark.parametrize(
@@ -61,3 +61,16 @@ def test_discover_source_files(tmp_path: Path) -> None:
         (tmp_path / name).write_bytes(b"")
     (tmp_path / "ordner.docx").mkdir()
     assert [p.name for p in discover_source_files(tmp_path)] == ["A.docx", "a2.DOC", "b.doc"]
+
+
+def test_discover_source_files_in_unterordnern(tmp_path: Path) -> None:
+    for relative in ("z.docx", "Sub/b.docx", "Sub/Tiefer/a.doc", "sub2/~$x.docx", "a.docx"):
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_bytes(b"")
+    output = tmp_path / "out"
+    (output / "alt").mkdir(parents=True)
+    (output / "alt" / "export.docx").write_bytes(b"")
+
+    found = discover_source_files(tmp_path, exclude_dir=output)
+
+    assert [relative_display_path(p, tmp_path) for p in found] == ["a.docx", "Sub/b.docx", "Sub/Tiefer/a.doc", "z.docx"]

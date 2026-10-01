@@ -36,7 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
         "convert",
         help="Konvertiert alle .docx- und .doc-Dateien eines Eingabeordners.",
         description=(
-            "Verarbeitet alle .docx- und .doc-Dateien des Eingabeordners alphabetisch. .doc-Dateien werden "
+            "Verarbeitet alle .docx- und .doc-Dateien des Eingabeordners einschließlich aller Unterordner, "
+            "sortiert nach relativem Pfad. .doc-Dateien werden "
             "automatisch mit Microsoft Word nach .docx umgewandelt. Je "
             "Datei wird das passende Profil automatisch erkannt und ein Testfallordner mit testcase.json und "
             "screenshots/ erzeugt. "
@@ -44,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
             "2 = globaler Fehler (z. B. Output-Ordner nicht leer, ungültige Konfiguration)."
         ),
     )
-    convert.add_argument("--input-dir", required=True, type=Path, help="Eingabeordner mit .docx-/.doc-Dateien.")
+    convert.add_argument("--input-dir", required=True, type=Path, help="Eingabeordner mit .docx-/.doc-Dateien (inkl. Unterordner).")
     convert.add_argument("--output-dir", required=True, type=Path, help="Output-Basisordner; muss leer sein oder wird angelegt.")
     convert.add_argument(
         "--profile",

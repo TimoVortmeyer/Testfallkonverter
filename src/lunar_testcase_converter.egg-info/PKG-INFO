@@ -224,43 +224,84 @@ Profile sind klein und deklarativ. Erlaubt sind **ausschließlich**:
 ```json
 {
   "id": "lunar_standard_v1",
-  "name": "LUNAR Standard-Testfall",
+  "name": "Standard-Testfall mit Systemspalte (LUNAR und EDDI)",
   "required_markers": ["Testablauf", "Kurzbeschreibung"],
   "step_table": {
-    "required_columns": ["Schritt-Nr.", "System / Komponente", "Beschreibung des Testschritts", "Erwartete Ergebnisse"]
+    "required_columns": ["System / Komponente", "Beschreibung des Testschritts", "Erwartete Ergebnisse"]
+  },
+  "info_table": {
+    "required_labels": ["Kurzbeschreibung"]
   },
   "field_aliases": {
     "testfallname": ["Testfall", "Testfallname"],
-    "system": ["System / Komponente", "System/Komponente"]
+    "system": ["System / Komponente", "System / Transaktion"]
   }
 }
 ```
 
-Unbekannte Schlüssel (z. B. Mappings, Scoring, Code) werden beim Laden als
-Konfigurationsfehler abgewiesen. Bekannte semantische Schlüssel in `field_aliases`:
+`info_table.required_labels` ist optional: Die Tabelle mit zentralen Informationen
+ist dann die erste Tabelle vor dem Testablauf (ohne Deckblatt), die alle diese
+Bezeichner als Zelltext enthält. Fehlt sie, gibt es die Warnung
+`info_table_not_found`. Ohne Angabe gilt die letzte Tabelle vor der Schritttabelle.
 
-- Testfallfelder: `fachbereich`, `geschaeftsprozessszenario`, `geschaeftsprozess`,
-  `testfallzusammenfassung`, `testfallname`, `verantwortlicher`, `kurzbeschreibung`,
-  `voraussetzungen`, `erwartetes_ergebnis_testfall`, `datum_letzte_aenderung`, `aenderungsdatum`
+Unbekannte Schlüssel werden beim Laden als Konfigurationsfehler abgewiesen –
+auch in `field_aliases` (Tippfehler fallen so sofort auf). Erlaubte Schlüssel in
+`field_aliases`:
+
+- `testfallname` – Bezeichner der Testfall-Zeile auf dem Deckblatt (`Testfall: <Name>`)
 - Schrittspalten: `schritt_nummer`, `system`, `action`, `data`, `expected_result`, `actual_result`
   (`data` wird nach `steps[].data` übernommen; Spalten ohne Schlüssel werden ignoriert)
 
+`required_markers` werden als wörtlicher Text im Dokumentkörper gesucht (nicht in
+Kopf-/Fußzeilen). Eine Pflichtspalte gilt auch dann als vorhanden, wenn die
+Tabelle einen Alias derselben Gruppe verwendet (z. B. „System / Transaktion“ für
+„System / Komponente“).
+
 Mitgelieferte Profile:
 
-| Profil | Vorlage | Unterscheidungsmerkmal |
+| Profil | Vorlage | Unterscheidungsmerkmal | Info-Tabelle |
+|---|---|---|---|
+| `lunar_standard_v1` | Standard-Testfall (LUNAR und EDDI, früher auch `eddi_standard_v1`) | Marker „Kurzbeschreibung“, Systemspalte „System / Komponente“ oder „System / Transaktion“ | enthält „Kurzbeschreibung“ |
+| `lunar_legacy_v1` | ältere Vorlage | Spalte „Eingabedaten“, keine Systemspalte; die Spalte „Feld“ wird bewusst nicht übernommen | enthält „Beschreibung“ |
+| `gh_standard_v1` | GH-Vorlage | Marker „Geschäftsvorfall“, Spalten „Geschäftsprozess-Schritte“, „Eingabedaten / besondere Angaben“, „Ausgabedaten / erwartetes Ergebnis“; keine Systemspalte; „Variante“ und „Feld“ werden nicht übernommen; die Tabellen „Varianten“, „Tatsächliche Ergebnisse“ und „Fehlerbeschreibung“ ebenfalls nicht | enthält „Geschäftsvorfall“ |
+
+## 10a. Dokumentaufbau und Abbildung ins Ziel-JSON
+
+Jedes Testdokument besteht grundsätzlich aus Deckblatt, Tabelle mit zentralen
+Informationen und Schritttabelle:
+
+| Dokumentteil | Erkennung | Ziel-JSON |
 |---|---|---|
-| `lunar_standard_v1` | Standard-Testfall | Marker „Kurzbeschreibung“, Spalte „System / Komponente“ |
-| `lunar_legacy_v1` | ältere Vorlage | Spalte „Eingabedaten“, keine Systemspalte; „Beschreibung“ statt „Kurzbeschreibung“; die Spalte „Feld“ wird bewusst nicht übernommen |
+| Deckblatt: Prozesszeilen (`03.02 …`, `03.02.001 …`, optional Unterprozesse `03.02.001.01 …`) | Zeilen mit Prozessnummer vor der Testfall-Zeile, in derselben Zelle bzw. demselben Absatzblock | `custom_fields.customfield_00000` (Dummy) = `"Geschäftsprozess/Szenario/Unterprozess1/…"` |
+| Deckblatt: optionale Testfallbeschreibung | Zeilen zwischen letzter Prozesszeile und Testfall-Zeile, ohne Zeilenumbrüche zusammengeführt | `description`: `h1. <Testfallbeschreibung>` |
+| Deckblatt: `Testfall: <Name>` | Alias `testfallname` | `summary` |
+| Tabelle mit zentralen Informationen | Tabelle mit den Bezeichnern aus `info_table.required_labels`, sonst letzte Tabelle vor der Schritttabelle; nie die Deckblatt-Tabelle | an `description` angehängte Jira-Wiki-Tabelle |
+| Schritttabelle | Pflichtspalten des Profils | `steps[]` (wie bisher) |
 
-Erkannte Feldlayouts im Dokument:
+Wiki-Tabelle: jede Zeile `|Zelle|Zelle|`, leere Zellen als `| |`, Zeilenumbrüche
+in Zellen als `\\`, `|` im Text als `\|`. Vollständig leere Zeilen entfallen.
+Bilder in der Tabelle werden an ihrer Position als `!0001.png!` verankert und als
+globale Screenshots exportiert.
 
-- `Bezeichner: Wert` (oder `Bezeichner<TAB>Wert`) in einem Absatz,
-- Absatz nur mit Bezeichner, gefolgt von Inhaltsabsätzen bis zum nächsten
-  Bezeichner/zur nächsten Überschrift,
-- Tabellenzelle mit Bezeichner und Wert in der rechten Nachbarzelle.
+Beispiel:
 
-Bei mehrfach vorkommenden Feldern gilt die erste Fundstelle (Warnung
-`duplicate_field`, wenn der Inhalt abweicht).
+```text
+h1. Berücksichtigung von rechnungswirksamen Konditionen in der Bestellaktualisierung
+
+|Kurzbeschreibung|Berücksichtigung von neuangelegten …|
+|Voraussetzungen| |
+|Stammdaten|Betriebe, Lieferanten, Artikel, Einkaufskonditionen|
+```
+
+**Wichtig – Dummy-Feld:** `customfield_00000` ist ein gut erkennbarer Dummy bis
+zur Festlegung des Jira-Feldes (Konstante `PROCESS_PATH_FIELD` in
+`target_renderer.py`). Er erfüllt das Schema des Importers
+(`customfield_<Nummer>`), Jira selbst lehnt ein nicht existierendes Feld beim
+Anlegen des Tests aber ab. Vor einem echten Import muss die Konstante auf die
+richtige Feldnummer geändert werden.
+
+Nicht mehr übernommen werden weitere Deckblattzeilen (z. B. „Verantwortlicher: …“)
+und Inhalte weiterer Tabellen vor der Schritttabelle (z. B. Status/Version).
 
 ## 11. Neues Profil ergänzen
 
@@ -293,7 +334,7 @@ Bei mehrfach vorkommenden Feldern gilt die erste Fundstelle (Warnung
 
 | Fall | Ergebnis |
 |---|---|
-| Bild in einem zentralen Testfallfeld (z. B. Kurzbeschreibung) | globales `screenshots` + Anker in `description` |
+| Bild in der Tabelle mit zentralen Informationen | globales `screenshots` + Anker in der Wiki-Tabelle der `description` |
 | Bild in Zelle „Beschreibung des Testschritts“ | `steps[].attachments` + Anker in `steps[].action` |
 | Bild in Zelle „Erwartete Ergebnisse“ | `steps[].attachments` + Anker in `steps[].expected_result` |
 | Bild in Zelle „Tatsächliche Ergebnisse“ | `steps[].attachments` + Anker im Block „Tatsächliches Ergebnis“ |
@@ -384,8 +425,8 @@ Dokuments werden gemeinsam gemeldet.
 | Situation | Wert im Ziel-JSON |
 |---|---|
 | Erwartetes Ergebnis leer | `expected_result = "-"` (keine Warnung) |
-| Schritttabelle hat **keine** Systemspalte (z. B. `lunar_legacy_v1`) | `system = "nicht definiert"` |
-| Systemspalte vorhanden, Zelle aber leer | Fehler `required_field_missing` |
+| Schritttabelle hat keine Systemspalte (z. B. `lunar_legacy_v1`, `gh_standard_v1`) | `system = "nicht definiert"` |
+| Systemspalte vorhanden, Zelle aber leer (z. B. Folgezeilen ohne Schritt-Nr.) | `system = "nicht definiert"` |
 | Keine Eingabedaten-Spalte | `data = ""` |
 
 ## 15. Übergangslösung für tatsächliche Ergebnisse
@@ -409,11 +450,11 @@ erwartete Ergebnis leer, steht davor der Platzhalter `-`.
   (`XrayImportRenderer`). Für Custom-Field-Mappings `render_custom_fields`
   (bzw. `render_labels`, `render_components`) überschreiben oder erweitern –
   die Extraktion bleibt unverändert.
-- Die `description` enthält Abschnitte `h2. <Überschrift>` in fester Reihenfolge
-  (Fachbereich, Geschäftsprozessszenario, Geschäftsprozess,
-  Testfallzusammenfassung, Verantwortlicher, Kurzbeschreibung, Voraussetzungen,
-  Erwartetes Ergebnis, Datum der letzten Änderung, Änderungsdatum); leere Werte
-  entfallen.
+- Die `description` besteht aus `h1. <Testfallbeschreibung>` (falls vorhanden)
+  und der Tabelle mit zentralen Informationen als Jira-Wiki-Tabelle (Abschnitt 10a).
+- Die Geschäftsprozessstruktur steht derzeit im Dummy-Feld
+  `custom_fields.customfield_00000`; sobald das Jira-Feld feststeht, nur
+  `PROCESS_PATH_FIELD` in `target_renderer.py` auf `customfield_<Nummer>` ändern.
 - `schema/testcase.schema.json` (JSON Schema 2020-12) muss bei Änderungen am
   Renderer mitgepflegt werden. Bildreferenzen müssen dem Muster `*.png` ohne
   Pfadanteile entsprechen. Neue Felder sind wegen `additionalProperties: false`
@@ -458,11 +499,11 @@ $env:LUNAR_TEST_WORD_DOC = "C:\temp\input\beispiel.doc"; python -m pytest -k ech
 - Vertikal verbundene Zellen (`vMerge`) übernehmen den Text der Ursprungszelle,
   Bilder werden nicht dupliziert. Zeilen mit einer über mehrere Inhaltsspalten
   verbundenen Zelle gelten als Layout-Zeile und werden mit Warnung ignoriert.
-- Feldwerte werden nur über die rechte Nachbarzelle, den Folgeabsatz oder
-  `Bezeichner: Wert` erkannt; vertikale Bezeichner/Wert-Layouts
-  (Bezeichner oben, Wert darunter) werden nicht erkannt.
-- Unbeschriftete Titelzeilen (z. B. Prozessnummern im Deckblatt) werden keinem
-  Feld zugeordnet.
+- Prozesszeilen werden nur an der Nummerierung (`NN.NN …`, `NN.NN.NNN …`)
+  erkannt; ohne Prozesszeilen gibt es auch keine Testfallbeschreibung (`h1.`).
+- Ohne `info_table.required_labels` gilt die letzte Tabelle vor der
+  Schritttabelle als Info-Tabelle; weitere Tabellen davor werden nicht übernommen. Jira-Wiki-
+  Tabellen kennen keine verbundenen Zellen; verbundene Zellen erscheinen als eine Zelle.
 - Nummerierungen/Aufzählungszeichen aus Word-Listen werden nicht als Text
   übernommen.
 - Kopf- und Fußzeilen werden nicht ausgewertet.

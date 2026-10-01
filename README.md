@@ -49,9 +49,12 @@ PowerShell-Ressource `resources/convert_doc_to_docx.ps1`.
   (Abschnitt 4) und danach wie `.docx` verarbeitet.
 
 Verarbeitet werden alle Dateien mit diesen Endungen (Groß-/Kleinschreibung egal)
-**direkt** im Eingabeordner (keine Unterordner), alphabetisch nach Dateiname.
-Temporäre Word-Dateien (`~$…`) werden ignoriert. Ein Dokument entspricht genau
-einem Testfall.
+im Eingabeordner **und in allen Unterordnern**, sortiert nach relativem Pfad
+(ohne Groß-/Kleinschreibung, z. B. `a.docx`, `Bereich B/b.docx`, `Bereich B/Tief/c.doc`).
+Temporäre Word-Dateien (`~$…`) werden ignoriert, Verzeichnisverknüpfungen
+(Symlinks/Junctions) nicht verfolgt. Liegt der Output-Ordner innerhalb des
+Eingabeordners, wird er nicht durchsucht. Im Log steht je Datei der Pfad relativ
+zum Eingabeordner. Ein Dokument entspricht genau einem Testfall.
 
 ## 4. `.doc`-Konvertierung mit Microsoft Word
 
@@ -110,7 +113,7 @@ python -m lunar_converter convert `
 
 | Parameter | Pflicht | Bedeutung |
 |---|---|---|
-| `--input-dir` | ja | Eingabeordner mit `.docx`/`.doc` |
+| `--input-dir` | ja | Eingabeordner mit `.docx`/`.doc`, inklusive Unterordner |
 | `--output-dir` | ja | Output-Basisordner (muss leer sein oder wird angelegt) |
 | `--profile <id>` | nein | Nur dieses Profil prüfen (Debugging/Migration), kein Fallback |
 | `--log-level` | nein | `DEBUG`, `INFO` (Standard), `WARNING`, `ERROR` |
@@ -161,12 +164,16 @@ Ausgabe je erfolgreicher Quelldatei:
       0002.png
 ```
 
+Der Output ist auch bei Unterordnern im Eingabeordner **flach** (eine Ebene
+Testfallordner), weil der Importer `<ordner>/*/testcase.json` liest.
+
 Der Ordnername wird ausschließlich aus dem Dateinamen gebildet (nie aus der
 Summary). Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen) und – wie im POC –
 Leerraum werden durch `_` ersetzt; reservierte Windows-Namen (`CON`, `NUL`, …)
 erhalten ein `_`. Ergeben zwei Quelldateien denselben Ordnernamen (z. B.
-`Test Fall.docx` und `Test_Fall.docx`), wird die alphabetisch spätere mit `output_name_conflict`
-abgelehnt.
+`Test Fall.docx` und `Test_Fall.docx` oder gleichnamige Dateien in verschiedenen
+Unterordnern), wird die in der Sortierung spätere mit `output_name_conflict`
+abgelehnt; die Meldung nennt die Datei, die den Namen bereits belegt.
 
 ## 8. Atomarer Export pro Testfall
 

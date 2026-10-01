@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lunar_converter.cli import main
 from tests.fixtures.docx_factory import PNG, DocSpec, StepSpec, build_lunar_docx, build_poc_sample_docx
-from tests.helpers import RunConvert, error_codes, file_entry, final_entries, load_report, load_testcase
+from tests.helpers import (
+    CONFIG_DIR,
+    SCHEMA_PATH,
+    RunConvert,
+    error_codes,
+    file_entry,
+    final_entries,
+    load_report,
+    load_testcase,
+)
 
 
 def test_erfolgreiche_verarbeitung_einer_docx(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
@@ -112,6 +122,37 @@ def test_bei_fehler_kein_finaler_testfallordner(input_dir: Path, output_dir: Pat
 
     assert final_entries(output_dir) == []
     assert not any(p.name.startswith(".") for p in output_dir.iterdir())
+
+
+def test_unterordner_werden_verarbeitet_output_bleibt_flach(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+    build_lunar_docx(input_dir / "Bereich A" / "Fall_1.docx", DocSpec(name="TF_A1"))
+    build_lunar_docx(input_dir / "Bereich B" / "Tief" / "Fall_2.docx", DocSpec(name="TF_B2"))
+    build_lunar_docx(input_dir / "Bereich B" / "Fall_1.docx", DocSpec(name="TF_B1"))
+
+    assert run_convert() == 1
+
+    report = load_report(output_dir)
+    assert [Path(entry["input_file"]).relative_to(input_dir).as_posix() for entry in report["files"]] == [
+        "Bereich A/Fall_1.docx",
+        "Bereich B/Fall_1.docx",
+        "Bereich B/Tief/Fall_2.docx",
+    ]
+    assert final_entries(output_dir) == ["Fall_1", "Fall_2"]
+    assert load_testcase(output_dir, "Fall_1")["summary"] == "TF_A1"
+    conflict = report["files"][1]
+    assert error_codes(conflict) == ["output_name_conflict"]
+    assert "Bereich A/Fall_1.docx" in conflict["errors"][0]["message"]
+    assert "[Datei: Bereich B/Tief/Fall_2.docx]" in (output_dir / "conversion.log").read_text(encoding="utf-8")
+
+
+def test_output_ordner_im_input_ordner_wird_nicht_durchsucht(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    build_lunar_docx(input_dir / "a.docx")
+    output_dir = input_dir / "export"
+
+    args = ["convert", "--input-dir", str(input_dir), "--output-dir", str(output_dir)]
+    assert main([*args, "--schema-path", str(SCHEMA_PATH), "--config-dir", str(CONFIG_DIR)]) == 0
+    assert load_report(output_dir)["summary"]["total"] == 1
 
 
 def test_dateiauswahl_sortierung_und_temporaere_dateien(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
