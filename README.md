@@ -91,6 +91,17 @@ umzuwandeln:
 
 ## 5. Installation und virtuelle Umgebung
 
+Unter Windows kann der Konverter mit `start_testfallkonverter.cmd` gestartet
+werden. Beim ersten Start erstellt der Launcher `.venv` und installiert die
+Abhängigkeiten aus `requirements.txt`; dafür sind Python 3.11+ und
+Internetverbindung erforderlich. CLI-Argumente werden weitergereicht:
+
+```powershell
+.\start_testfallkonverter.cmd convert --input-dir .\input --output-dir .\output\lauf1
+```
+
+Für `.doc`-Dateien wird weiterhin Microsoft Word benötigt.
+
 ```powershell
 cd Testfallkonverter
 python -m venv .venv
