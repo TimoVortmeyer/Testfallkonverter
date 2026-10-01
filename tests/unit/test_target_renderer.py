@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from lunar_converter.image_assignment import assign_images
-from lunar_converter.semantic_model import ImageMarker, InfoTable, RichText, TestCase, TestStep, UnassignedImage
+from lunar_converter.semantic_model import CheckboxMarker, ImageMarker, InfoTable, RichText, TestCase, TestStep, UnassignedImage
 from lunar_converter.target_renderer import XrayImportRenderer, render_rich_text, render_wiki_table
 
 
@@ -45,11 +45,11 @@ def test_render_rich_text_setzt_anker_mit_leerzeichen() -> None:
 def test_renderer_komplett() -> None:
     exported = {1: "0001.png", 2: "0002.png", 3: "0003.png", 4: "0004.png"}
     assignment = assign_images(_test_case(), exported)
-    payload = XrayImportRenderer().render(_test_case(), assignment)
+    payload = XrayImportRenderer().render(_test_case(), assignment, "a")
 
-    assert payload["summary"] == "TF_1"
+    assert payload["summary"] == "a"
     assert payload["description"] == "h1. Prüfung Konditionen\n\n|Kurzbeschreibung|Text \\\\ !0001.png!|\n|Voraussetzungen| |"
-    assert payload["custom_fields"] == {"customfield_00000": "03.02 Einkauf/03.02.001 Konditionen/03.02.001.01 GH"}
+    assert payload["custom_fields"] == {"customfield_15909": "03.02 Einkauf/03.02.001 Konditionen/03.02.001.01 GH"}
     assert payload["screenshots"] == ["0001.png", "0004.png"]
     step = payload["steps"][0]
     assert step["action"] == "Klick auf !0002.png! Knopf"
@@ -61,7 +61,7 @@ def test_renderer_komplett() -> None:
 
 def test_nicht_exportierte_bilder_erhalten_keinen_anker() -> None:
     assignment = assign_images(_test_case(), {1: "0001.png"})
-    payload = XrayImportRenderer().render(_test_case(), assignment)
+    payload = XrayImportRenderer().render(_test_case(), assignment, "a")
     assert payload["screenshots"] == ["0001.png"]
     assert payload["steps"][0]["action"] == "Klick auf Knopf"
     assert payload["steps"][0]["attachments"] == []
@@ -79,3 +79,13 @@ def test_description_und_custom_fields_ohne_deckblattdaten() -> None:
 def test_wiki_tabelle_maskiert_pipes_und_zeilenumbrueche() -> None:
     table = InfoTable(rows=[[RichText.from_text("A|B"), RichText(lines=[["Zeile 1"], [""], ["Zeile 2"]])]])
     assert render_wiki_table(table, {}) == "|A\\|B|Zeile 1 \\\\ Zeile 2|"
+
+
+def test_checkbox_emoticons_sind_auf_info_tabelle_begrenzt() -> None:
+    checked = RichText(lines=[[CheckboxMarker(checked=True)]])
+    unchecked = RichText(lines=[[CheckboxMarker(checked=False)]])
+    table = InfoTable(rows=[[checked, unchecked]])
+
+    assert render_wiki_table(table, {}) == "|(/)|(x)|"
+    assert render_rich_text(checked, {}) == "☒"
+    assert render_rich_text(unchecked, {}) == "☐"

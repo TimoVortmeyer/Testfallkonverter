@@ -53,6 +53,13 @@ ImageKind = Literal["drawingml", "vml"]
 
 
 @dataclass(frozen=True)
+class CheckboxRef:
+    """Zustand einer Word-Checkbox im Dokumentfluss."""
+
+    checked: bool
+
+
+@dataclass(frozen=True)
 class ImageRef:
     """Eine sichtbare Bildplatzierung im Dokumentkörper.
 
@@ -71,7 +78,7 @@ class ImageRef:
     external: bool = False
 
 
-Segment = str | ImageRef
+Segment = str | ImageRef | CheckboxRef
 
 
 @dataclass

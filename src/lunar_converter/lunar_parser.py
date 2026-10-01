@@ -21,7 +21,7 @@ import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
-from .models import ImageRef, Issue, ProfileDefinition, Segment, SourceCell, SourceDocument, SourceParagraph, SourceRow, SourceTable
+from .models import CheckboxRef, ImageRef, Issue, ProfileDefinition, Segment, SourceCell, SourceDocument, SourceParagraph, SourceRow, SourceTable
 from .semantic_model import (
     STEP_ACTION_KEY,
     STEP_ACTUAL_KEY,
@@ -30,6 +30,7 @@ from .semantic_model import (
     STEP_NUMBER_KEY,
     STEP_SYSTEM_KEY,
     TESTCASE_NAME_KEY,
+    CheckboxMarker,
     ImageMarker,
     InfoTable,
     Inline,
@@ -101,6 +102,7 @@ class _TestCaseParser:
             profile_id=self._profile.id,
             name=name,
             steps=steps,
+            labels=_cover_labels(cover.table) if cover else [],
             process_path=cover.process_path if cover else [],
             title=cover.title if cover else "",
             info_table=info_table,
@@ -274,6 +276,8 @@ class _TestCaseParser:
             for segment in line:
                 if isinstance(segment, str):
                     items.append(segment)
+                elif isinstance(segment, CheckboxRef):
+                    items.append(CheckboxMarker(segment.checked))
                 elif segment.floating:
                     self._image_reasons.setdefault(segment.image_id, _FLOATING_REASON)
                 else:
@@ -298,14 +302,26 @@ class _TestCaseParser:
 
 
 def _cover_header(paragraphs: list[SourceParagraph]) -> tuple[list[str], str]:
-    """Prozesszeilen und Testfallbeschreibung (Zeilen nach der letzten Prozesszeile) vor der Testfall-Zeile."""
+    """Prozesspfad und Beschreibung vor der Testfall-Zeile aus dem Deckblatt lesen."""
     texts = [clean_line(normalize_newlines(paragraph.text).replace("\n", " ")) for paragraph in paragraphs]
     process_indices = [index for index, text in enumerate(texts) if _PROCESS_LINE_RE.match(text)]
     if not process_indices:
         return [], ""
     process_path = [texts[index] for index in process_indices]
-    title = " ".join(text for text in texts[process_indices[-1] + 1 :] if text)
+    trailing_levels = [text for text in texts[process_indices[-1] + 1 :] if text]
+    process_path.extend(trailing_levels)
+    title = " ".join(trailing_levels)
     return process_path, title
+
+
+def _cover_labels(table: SourceTable | None) -> list[str]:
+    if table is None or not table.rows or not table.rows[0].cells:
+        return []
+    for paragraph in table.rows[0].cells[0].paragraphs:
+        label = clean_line(paragraph.text)
+        if label:
+            return [label]
+    return []
 
 
 def _cell_headings(table: SourceTable) -> set[str]:
@@ -313,7 +329,7 @@ def _cell_headings(table: SourceTable) -> set[str]:
 
 
 def _lines_have_content(lines: Lines) -> bool:
-    return any(isinstance(segment, ImageRef) or not is_blank(segment) for line in lines for segment in line)
+    return any(isinstance(segment, (ImageRef, CheckboxRef)) or not is_blank(segment) for line in lines for segment in line)
 
 
 def _inline_line_blank(line: list[Inline]) -> bool:

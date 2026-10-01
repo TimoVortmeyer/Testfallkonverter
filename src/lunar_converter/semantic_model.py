@@ -42,7 +42,14 @@ class ImageMarker:
     image_id: int
 
 
-Inline = str | ImageMarker
+@dataclass(frozen=True)
+class CheckboxMarker:
+    """Zustand einer Checkbox, deren Zieldarstellung der Renderer bestimmt."""
+
+    checked: bool
+
+
+Inline = str | ImageMarker | CheckboxMarker
 
 
 @dataclass
@@ -62,7 +69,8 @@ class RichText:
         return "\n".join("".join(item for item in line if isinstance(item, str)) for line in self.lines)
 
     def is_empty(self) -> bool:
-        return not self.image_ids() and is_blank(self.plain_text())
+        has_checkbox = any(isinstance(item, CheckboxMarker) for line in self.lines for item in line)
+        return not self.image_ids() and not has_checkbox and is_blank(self.plain_text())
 
 
 @dataclass
@@ -114,6 +122,7 @@ class TestCase:
     profile_id: str
     name: str
     steps: list[TestStep]
+    labels: list[str] = field(default_factory=list)
     # Geschäftsprozess, Geschäftsprozessszenario, optionale Unterprozesse (Deckblatt).
     process_path: list[str] = field(default_factory=list)
     # Optionale Testfallbeschreibung vom Deckblatt, einzeilig.

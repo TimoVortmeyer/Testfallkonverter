@@ -27,16 +27,16 @@ def test_erfolgreiche_verarbeitung_einer_docx(input_dir: Path, output_dir: Path,
     assert run_convert() == 0
 
     testcase = load_testcase(output_dir, "TFB_03.03.004_EH_012_MDE_Direktbestellung")
-    assert testcase["summary"] == "TF_Beispiel_001"
+    assert testcase["summary"] == "TFB_03.03.004_EH_012_MDE_Direktbestellung"
     assert testcase["description"] == (
         "h1. Prüfung der Beispielkonditionen\n\n"
         "|Fachbereich|Finanzen|\n"
         "|Kurzbeschreibung|Es wird ein Beispiel geprüft.|\n"
         "|Voraussetzungen|Stammdaten sind vorhanden.|"
     )
-    assert testcase["labels"] == [] and testcase["components"] == []
+    assert testcase["labels"] == ["RWWS"] and testcase["components"] == []
     assert testcase["custom_fields"] == {
-        "customfield_00000": "03.02 Einkaufsverwaltung/03.02.001 Pflege Einkaufskonditionen"
+        "customfield_15909": "03.02 Einkaufsverwaltung/03.02.001 Pflege Einkaufskonditionen/Prüfung der/Beispielkonditionen"
     }
     assert testcase["steps"] == [
         {
@@ -59,7 +59,8 @@ def test_poc_beispiel_wird_weiterhin_verarbeitet(input_dir: Path, output_dir: Pa
     assert run_convert() == 0
 
     testcase = load_testcase(output_dir, "sample")
-    assert testcase["summary"] == "Beispiel Testfall"
+    assert testcase["summary"] == "sample"
+    assert testcase["labels"] == []
     # Ohne Deckblatt-Prozesszeilen und ohne Tabelle vor dem Testablauf bleibt die Description leer.
     assert testcase["description"] == ""
     assert testcase["custom_fields"] == {}
@@ -138,7 +139,7 @@ def test_unterordner_werden_verarbeitet_output_bleibt_flach(input_dir: Path, out
         "Bereich B/Tief/Fall_2.docx",
     ]
     assert final_entries(output_dir) == ["Fall_1", "Fall_2"]
-    assert load_testcase(output_dir, "Fall_1")["summary"] == "TF_A1"
+    assert load_testcase(output_dir, "Fall_1")["summary"] == "Fall_1"
     conflict = report["files"][1]
     assert error_codes(conflict) == ["output_name_conflict"]
     assert "Bereich A/Fall_1.docx" in conflict["errors"][0]["message"]
@@ -228,13 +229,15 @@ def test_dry_run_schreibt_keine_exportdaten(input_dir: Path, output_dir: Path, r
     assert entry["exported_image_count"] == 1
 
 
-def test_dry_run_meldet_validierungsfehler(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+def test_summary_wird_auch_ohne_dokumentnamen_aus_dateiname_gebildet(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
     build_lunar_docx(input_dir / "a.docx", DocSpec(name=None))
 
-    assert run_convert("--dry-run") == 1
+    assert run_convert() == 0
 
-    assert final_entries(output_dir) == []
-    assert error_codes(file_entry(load_report(output_dir), "a.docx")) == ["required_field_missing"]
+    assert load_testcase(output_dir, "a")["summary"] == "a"
+    assert error_codes(file_entry(load_report(output_dir), "a.docx")) == []
 
 
 def test_ordnername_konflikt_wird_erkannt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:

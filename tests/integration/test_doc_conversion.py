@@ -56,7 +56,7 @@ def test_doc_wird_mit_word_umgewandelt(
     assert command[1:4] == ["-NoProfile", "-NonInteractive", "-File"]
     assert "ExecutionPolicy" not in " ".join(command)
     assert Path(command[4]).name == "convert_doc_to_docx.ps1" and Path(command[4]).is_file()
-    assert load_testcase(output_dir, "Alt_Format_ä")["summary"] == "TF_aus_DOC"
+    assert load_testcase(output_dir, "Alt_Format_ä")["summary"] == "Alt Format ä"
     assert sorted(p.name for p in input_dir.iterdir()) == ["Alt Format ä.doc"]
 
 

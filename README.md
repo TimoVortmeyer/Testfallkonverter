@@ -168,8 +168,9 @@ Der Output ist auch bei Unterordnern im Eingabeordner **flach** (eine Ebene
 Testfallordner), weil der Importer `<ordner>/*/testcase.json` liest.
 
 Der Ordnername wird ausschließlich aus dem Dateinamen gebildet (nie aus der
-Summary). Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen) und – wie im POC –
-Leerraum werden durch `_` ersetzt; reservierte Windows-Namen (`CON`, `NUL`, …)
+Summary). Auch die `summary` in `testcase.json` wird aus dem Dateinamen ohne
+`.doc`- oder `.docx`-Endung gebildet. Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen)
+und – wie im POC – Leerraum werden durch `_` ersetzt; reservierte Windows-Namen (`CON`, `NUL`, …)
 erhalten ein `_`. Ergeben zwei Quelldateien denselben Ordnernamen (z. B.
 `Test Fall.docx` und `Test_Fall.docx` oder gleichnamige Dateien in verschiedenen
 Unterordnern), wird die in der Sortierung spätere mit `output_name_conflict`
@@ -267,9 +268,10 @@ Informationen und Schritttabelle:
 
 | Dokumentteil | Erkennung | Ziel-JSON |
 |---|---|---|
-| Deckblatt: Prozesszeilen (`03.02 …`, `03.02.001 …`, optional Unterprozesse `03.02.001.01 …`) | Zeilen mit Prozessnummer vor der Testfall-Zeile, in derselben Zelle bzw. demselben Absatzblock | `custom_fields.customfield_00000` (Dummy) = `"Geschäftsprozess/Szenario/Unterprozess1/…"` |
+| Deckblatt: Label | Erster nichtleerer Absatz der ersten Zelle der Deckblatt-Tabelle | `labels`: einzelnes Label, z. B. `RWWS` oder `RWWS-GH` |
+| Deckblatt: Prozesspfad | Nummerierte Prozesszeilen und alle nichtleeren Deckblattabsätze danach bis zur Testfall-Zeile, in Dokumentreihenfolge | `custom_fields.customfield_15909` = `"Prozess1/Prozess2/Prozess3/…"` |
 | Deckblatt: optionale Testfallbeschreibung | Zeilen zwischen letzter Prozesszeile und Testfall-Zeile, ohne Zeilenumbrüche zusammengeführt | `description`: `h1. <Testfallbeschreibung>` |
-| Deckblatt: `Testfall: <Name>` | Alias `testfallname` | `summary` |
+| Deckblatt: `Testfall: <Name>` | Alias `testfallname` | kein Zielfeld; `summary` kommt aus dem Quelldateinamen |
 | Tabelle mit zentralen Informationen | Tabelle mit den Bezeichnern aus `info_table.required_labels`, sonst letzte Tabelle vor der Schritttabelle; nie die Deckblatt-Tabelle | an `description` angehängte Jira-Wiki-Tabelle |
 | Schritttabelle | Pflichtspalten des Profils | `steps[]` (wie bisher) |
 
@@ -277,6 +279,9 @@ Wiki-Tabelle: jede Zeile `|Zelle|Zelle|`, leere Zellen als `| |`, Zeilenumbrüch
 in Zellen als `\\`, `|` im Text als `\|`. Vollständig leere Zeilen entfallen.
 Bilder in der Tabelle werden an ihrer Position als `!0001.png!` verankert und als
 globale Screenshots exportiert.
+Bekannte Jira-Emoticon-Kürzel in Quelldaten werden escaped, damit Jira sie als
+Text darstellt. Word-Checkboxen in der Info-Tabelle werden gezielt als `(/)`
+(angekreuzt) bzw. `(x)` (leer) ausgegeben.
 
 Beispiel:
 
@@ -288,12 +293,9 @@ h1. Berücksichtigung von rechnungswirksamen Konditionen in der Bestellaktualisi
 |Stammdaten|Betriebe, Lieferanten, Artikel, Einkaufskonditionen|
 ```
 
-**Wichtig – Dummy-Feld:** `customfield_00000` ist ein gut erkennbarer Dummy bis
-zur Festlegung des Jira-Feldes (Konstante `PROCESS_PATH_FIELD` in
-`target_renderer.py`). Er erfüllt das Schema des Importers
-(`customfield_<Nummer>`), Jira selbst lehnt ein nicht existierendes Feld beim
-Anlegen des Tests aber ab. Vor einem echten Import muss die Konstante auf die
-richtige Feldnummer geändert werden.
+**Testrepository-Pfad:** Der aus den Prozesszeilen gebildete Pfad wird unter
+`custom_fields.customfield_15909` ausgegeben. Das ist die konfigurierte Xray-
+Feld-ID für den Testrepository-Pfad.
 
 Nicht mehr übernommen werden weitere Deckblattzeilen (z. B. „Verantwortlicher: …“)
 und Inhalte weiterer Tabellen vor der Schritttabelle (z. B. Status/Version).
@@ -411,7 +413,7 @@ Fehlercodes je Datei: `input_file_error`, `doc_conversion_failed`,
 Fehler einer Datei brechen den Batch nicht ab. Mit `--fail-fast` werden die
 restlichen Dateien als `skipped` gemeldet.
 
-Pflichtregeln: `summary` (= Testfallname) nicht leer, mindestens ein Schritt,
+Pflichtregeln: `summary` (= Quelldateiname ohne `.doc`/`.docx`) nicht leer, mindestens ein Schritt,
 je Schritt `system` und `action` nicht leer. Alle Pflichtfeldfehler eines
 Dokuments werden gemeinsam gemeldet.
 
@@ -422,6 +424,7 @@ Dokuments werden gemeinsam gemeldet.
 | Erwartetes Ergebnis leer | `expected_result = "-"` (keine Warnung) |
 | Schritttabelle hat keine Systemspalte (z. B. `lunar_legacy_v1`, `gh_standard_v1`) | `system = "nicht definiert"` |
 | Systemspalte vorhanden, Zelle aber leer (z. B. Folgezeilen ohne Schritt-Nr.) | `system = "nicht definiert"` |
+| Eingabedaten vorhanden | Werden mit `\n` an `action` angehängt; `data = ""` |
 | Keine Eingabedaten-Spalte | `data = ""` |
 
 ## 15. Übergangslösung für tatsächliche Ergebnisse
@@ -447,9 +450,8 @@ erwartete Ergebnis leer, steht davor der Platzhalter `-`.
   die Extraktion bleibt unverändert.
 - Die `description` besteht aus `h1. <Testfallbeschreibung>` (falls vorhanden)
   und der Tabelle mit zentralen Informationen als Jira-Wiki-Tabelle (Abschnitt 10a).
-- Die Geschäftsprozessstruktur steht derzeit im Dummy-Feld
-  `custom_fields.customfield_00000`; sobald das Jira-Feld feststeht, nur
-  `PROCESS_PATH_FIELD` in `target_renderer.py` auf `customfield_<Nummer>` ändern.
+- Die Geschäftsprozessstruktur steht unter der Xray-Feld-ID für den
+  Testrepository-Pfad `custom_fields.customfield_15909` (`PROCESS_PATH_FIELD`).
 - `schema/testcase.schema.json` (JSON Schema 2020-12) muss bei Änderungen am
   Renderer mitgepflegt werden. Bildreferenzen müssen dem Muster `*.png` ohne
   Pfadanteile entsprechen. Neue Felder sind wegen `additionalProperties: false`

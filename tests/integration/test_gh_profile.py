@@ -25,9 +25,10 @@ def test_gh_vorlage_wird_erkannt_und_exportiert(input_dir: Path, output_dir: Pat
     assert entry["warnings"] == []
 
     testcase = load_testcase(output_dir, "gh")
-    assert testcase["summary"] == "TFB_GH_0001"
+    assert testcase["summary"] == "gh"
+    assert testcase["labels"] == ["RWWS-GH"]
     assert testcase["custom_fields"] == {
-        "customfield_00000": "03.02 Einkaufsverwaltung/03.02.001 GH Pflege Einkaufskonditionen (EGKE)"
+        "customfield_15909": "03.02 Einkaufsverwaltung/03.02.001 GH Pflege Einkaufskonditionen (EGKE)/MEK1 - EK-Konditionen anlegen"
     }
     # Info-Tabelle ist die Tabelle mit "Geschäftsvorfall", nicht die letzte Tabelle vor dem Testablauf.
     assert testcase["description"] == (
@@ -39,6 +40,7 @@ def test_gh_vorlage_wird_erkannt_und_exportiert(input_dir: Path, output_dir: Pat
     assert first["system"] == "nicht definiert"
     assert first["action"] == "MEK1 - EK-Konditionen anlegen"
     assert first["expected_result"] == "-"
-    assert second["data"] == "Einkaufsorganisation 0010"
+    assert second["action"] == "Einkaufskondition anlegen\nEinkaufsorganisation 0010"
+    assert second["data"] == ""
     assert second["expected_result"] == "Eintrag wird angelegt."
     assert "Lieferant" not in str(testcase) and "0001" not in str(testcase["steps"])

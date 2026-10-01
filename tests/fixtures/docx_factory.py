@@ -184,11 +184,16 @@ def build_lunar_docx(path: Path, spec: DocSpec | None = None) -> Path:
     return path
 
 
-def build_legacy_docx(path: Path, steps: list[tuple[str, str, str, str, str]], name: str = "EG930_Beispiel") -> Path:
+def build_legacy_docx(
+    path: Path,
+    steps: list[tuple[str, str, str, str, str]],
+    name: str = "EG930_Beispiel",
+    cover_label: str = "EG930_RWWS2.0_EH",
+) -> Path:
     """Ältere Vorlage; ``steps`` enthält je Zeile (Nr., Beschreibung, Feld, Eingabedaten, Erwartete Ergebnisse)."""
     document = Document()
     title = document.add_table(rows=2, cols=1)
-    _set_text(title.cell(0, 0), "EG930_RWWS2.0_EH\nTestfallbeschreibung")
+    _set_text(title.cell(0, 0), f"{cover_label}\nTestfallbeschreibung")
     _set_text(
         title.cell(1, 0),
         f"07.04 Sachkontenpflege\n07.04.001 Sachkontenstammdatenpflege\nInitiale Übernahme der Sachkonten\nTestfall: {name}",

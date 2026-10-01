@@ -10,23 +10,24 @@ from tests.fixtures.docx_factory import DocSpec, StepSpec, build_lunar_docx
 from tests.helpers import RunConvert, error_codes, file_entry, final_entries, load_report, load_testcase
 
 
-def test_fehlender_testfallname_wird_abgelehnt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+def test_fehlender_testfallname_wird_aus_dateiname_ersetzt(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
     build_lunar_docx(input_dir / "ohne_name.docx", DocSpec(name=None))
 
-    assert run_convert() == 1
+    assert run_convert() == 0
 
     entry = file_entry(load_report(output_dir), "ohne_name.docx")
     assert entry["detected_profile"] == "lunar_standard_v1"
-    assert entry["errors"][0]["code"] == "required_field_missing"
-    assert entry["errors"][0]["field"] == "summary"
-    assert final_entries(output_dir) == []
+    assert entry["errors"] == []
+    assert load_testcase(output_dir, "ohne_name")["summary"] == "ohne_name"
 
 
-def test_leerer_testfallname_wird_abgelehnt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+def test_leerer_testfallname_wird_aus_dateiname_ersetzt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
     build_lunar_docx(input_dir / "leer.docx", DocSpec(name="   "))
 
-    assert run_convert() == 1
-    assert file_entry(load_report(output_dir), "leer.docx")["errors"][0]["field"] == "summary"
+    assert run_convert() == 0
+    assert load_testcase(output_dir, "leer")["summary"] == "leer"
 
 
 @pytest.mark.parametrize(
@@ -78,4 +79,4 @@ def test_alle_fehlenden_felder_werden_gemeldet(input_dir: Path, output_dir: Path
     assert run_convert() == 1
 
     fields = [error["field"] for error in file_entry(load_report(output_dir), "a.docx")["errors"]]
-    assert fields == ["summary", "steps[0].action"]
+    assert fields == ["steps[0].action"]

@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from .models import ImageKind, ImageRef, Segment, SourceBlock, SourceCell, SourceParagraph, SourceRow, SourceTable, VMerge
+from .models import CheckboxRef, ImageKind, ImageRef, Segment, SourceBlock, SourceCell, SourceParagraph, SourceRow, SourceTable, VMerge
 
 NAMESPACES: dict[str, str] = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
@@ -26,6 +26,7 @@ NAMESPACES: dict[str, str] = {
     "wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
     "v": "urn:schemas-microsoft-com:vml",
     "mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
+    "w14": "http://schemas.microsoft.com/office/word/2010/wordml",
 }
 
 
@@ -40,6 +41,16 @@ W_TR = qn("w:tr")
 W_TC = qn("w:tc")
 W_SDT = qn("w:sdt")
 W_SDT_CONTENT = qn("w:sdtContent")
+W_SDT_PR = qn("w:sdtPr")
+W14_CHECKBOX = qn("w14:checkbox")
+W14_CHECKED = qn("w14:checked")
+W_FLD_CHAR = qn("w:fldChar")
+W_FF_DATA = qn("w:ffData")
+W_CHECKBOX = qn("w:checkBox")
+W_CHECKED = qn("w:checked")
+W_DEFAULT = qn("w:default")
+W_SYM = qn("w:sym")
+W_FLD_CHAR_TYPE = qn("w:fldCharType")
 W_CUSTOM_XML = qn("w:customXml")
 W_T = qn("w:t")
 W_TAB = qn("w:tab")
@@ -52,6 +63,7 @@ W_PICT = qn("w:pict")
 W_OBJECT = qn("w:object")
 W_TXBX_CONTENT = qn("w:txbxContent")
 W_VAL = qn("w:val")
+W14_VAL = qn("w14:val")
 A_BLIP = qn("a:blip")
 V_IMAGEDATA = qn("v:imagedata")
 WP_ANCHOR = qn("wp:anchor")
@@ -61,6 +73,15 @@ MC_FALLBACK = qn("mc:Fallback")
 R_EMBED = qn("r:embed")
 R_LINK = qn("r:link")
 R_ID = qn("r:id")
+W_FONT = qn("w:font")
+W_CHAR = qn("w:char")
+_CHECKBOX_GLYPHS = {"☐": False, "☑": True, "☒": True}
+_SYMBOL_CHECKBOX_GLYPHS = {
+    ("wingdings", "00fe"): True,
+    ("wingdings", "00a8"): False,
+    ("wingdings 2", "0052"): True,
+    ("wingdings 2", "00a3"): False,
+}
 
 # Elemente ohne sichtbaren Inhalt oder mit gelöschtem/verstecktem Inhalt.
 _SKIPPED_INLINE_TAGS = frozenset(
@@ -176,11 +197,30 @@ class BodyTraversal:
     def _walk_inline(self, element: Any, segments: list[Segment], location: str, *, floating: bool) -> None:
         for child in element:
             tag = child.tag
-            if not isinstance(tag, str) or tag in _SKIPPED_INLINE_TAGS:
+            if not isinstance(tag, str):
                 continue
-            if tag == W_T:
+            if tag == W_FLD_CHAR:
+                if child.get(W_FLD_CHAR_TYPE) == "begin":
+                    checkbox = child.find(f"{W_FF_DATA}/{W_CHECKBOX}")
+                    if checkbox is not None:
+                        segments.append(CheckboxRef(_form_checkbox_checked(checkbox)))
+                continue
+            if tag == W_SYM:
+                _append_symbol_checkbox(child, segments)
+                continue
+            if tag in _SKIPPED_INLINE_TAGS:
+                continue
+            if tag == W_SDT:
+                checkbox = child.find(f"{W_SDT_PR}/{W14_CHECKBOX}")
+                if checkbox is not None:
+                    checked = checkbox.find(W14_CHECKED)
+                    value = checked.get(W14_VAL, "1").casefold() if checked is not None else "0"
+                    segments.append(CheckboxRef(checked is not None and value not in {"0", "false", "off"}))
+                else:
+                    self._walk_inline(child, segments, location, floating=floating)
+            elif tag == W_T:
                 if child.text:
-                    segments.append(child.text)
+                    _append_text_with_checkboxes(child.text, segments)
             elif tag in (W_TAB, W_PTAB):
                 segments.append("\t")
             elif tag in (W_BR, W_CR):
@@ -271,6 +311,39 @@ def _merge_text_segments(segments: list[Segment]) -> list[Segment]:
         else:
             merged.append(segment)
     return merged
+
+
+def _form_checkbox_checked(checkbox: Any) -> bool:
+    """Zustand einer FORMCHECKBOX: ``w:checked`` hat Vorrang vor ``w:default``."""
+    state = checkbox.find(W_CHECKED)
+    if state is None:
+        state = checkbox.find(W_DEFAULT)
+        if state is None:
+            return False
+    return state.get(W_VAL, "1").casefold() not in {"0", "false", "off"}
+
+
+def _append_symbol_checkbox(symbol: Any, segments: list[Segment]) -> None:
+    font = (symbol.get(W_FONT) or "").strip().casefold()
+    character = (symbol.get(W_CHAR) or "").casefold().removeprefix("0x")
+    checked = _SYMBOL_CHECKBOX_GLYPHS.get((font, character))
+    if checked is not None:
+        segments.append(CheckboxRef(checked))
+
+
+def _append_text_with_checkboxes(text: str, segments: list[Segment]) -> None:
+    buffer = ""
+    for character in text:
+        checked = _CHECKBOX_GLYPHS.get(character)
+        if checked is None:
+            buffer += character
+            continue
+        if buffer:
+            segments.append(buffer)
+            buffer = ""
+        segments.append(CheckboxRef(checked))
+    if buffer:
+        segments.append(buffer)
 
 
 def _int_attribute(element: Any, *, default: int) -> int:

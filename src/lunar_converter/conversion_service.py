@@ -199,7 +199,7 @@ class _FileConverter:
             if warning.details:
                 log.debug("Details: %s", warning.details)
 
-        payload = self._renderer.render(test_case, assignment)
+        payload = self._renderer.render(test_case, assignment, source.stem)
         validate_payload(payload, self._schema, screenshots_dir)
         write_testcase_json(package_dir / TESTCASE_FILE_NAME, payload)
 
