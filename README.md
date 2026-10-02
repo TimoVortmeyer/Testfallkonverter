@@ -136,7 +136,9 @@ wird temporär mit Microsoft Word nach `.docx` konvertiert. Der Preflight änder
 die Quelldateien nicht und erzeugt keine Testfall-Exports. Exit-Code `0` bedeutet,
 dass für jede Datei genau ein Profil passt; `1` bedeutet mindestens einen
 fehlenden/mehrdeutigen Treffer oder Dateifehler. Die CSV ist UTF-8 mit BOM und
-Semikolon als Trennzeichen.
+Semikolon als Trennzeichen. Zusätzlich entsteht daneben eine Logdatei mit dem
+gleichen Format wie bei der Konvertierung, standardmäßig `<csv-name>.preflight.log`.
+Mit `--log-level DEBUG` werden auch die Einzelgründe jeder Profilprüfung protokolliert.
 
 ```powershell
 python -m lunar_converter convert `

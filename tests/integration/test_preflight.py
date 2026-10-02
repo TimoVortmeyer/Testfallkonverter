@@ -28,6 +28,12 @@ def test_preflight_schreibt_profiltreffer_und_pruefgruende(tmp_path: Path) -> No
     assert rows["treffer.docx"]["erkanntes_profil"] == "lunar_standard_v1"
     assert rows["kein_treffer.docx"]["status"] == "no_matching_profile"
     assert "Marker fehlen" in rows["kein_treffer.docx"]["profilpruefungen"]
+    log_path = csv_path.with_name(f"{csv_path.stem}.preflight.log")
+    log_content = log_path.read_text(encoding="utf-8")
+    assert "Start des Profil-Preflights" in log_content
+    assert "treffer.docx" in log_content and "lunar_standard_v1" in log_content
+    assert "Kein Profil passt" in log_content
+    assert "Ende des Profil-Preflights" in log_content
 
 
 def test_preflight_konvertiert_doc_nur_temporär(tmp_path: Path, monkeypatch) -> None:

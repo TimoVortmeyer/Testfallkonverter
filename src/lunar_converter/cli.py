@@ -78,19 +78,23 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--input-dir", required=True, type=Path, help="Ordner mit .docx-/.doc-Dateien (inkl. Unterordner).")
     preflight.add_argument("--csv-path", required=True, type=Path, help="Zielpfad für den CSV-Bericht.")
     preflight.add_argument("--config-dir", type=Path, default=None, help="Profilordner (Standard: config/).")
+    preflight.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO", help="Log-Level (Standard: INFO).")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "preflight":
+        logger = configure_logging(args.log_level)
         try:
-            total, failed = run_preflight(args.input_dir, args.csv_path, args.config_dir or _default_path("config"))
+            total, failed = run_preflight(args.input_dir, args.csv_path, args.config_dir or _default_path("config"), logger)
         except LunarConverterError as exc:
-            print(f"Preflight abgebrochen ({exc.code}): {exc.message}", file=sys.stderr)
+            logger.error("Preflight abgebrochen (%s): %s", exc.code, exc.message)
             if exc.details:
-                print(exc.details, file=sys.stderr)
+                logger.error("Details: %s", exc.details)
             return EXIT_GLOBAL_ERROR
+        finally:
+            shutdown_logging(logger)
         print(f"Preflight: {total} Datei(en), {total - failed} eindeutig erkannt, {failed} ohne eindeutigen Treffer.")
         print(f"CSV: {args.csv_path}")
         return EXIT_FILE_ERRORS if failed else EXIT_OK

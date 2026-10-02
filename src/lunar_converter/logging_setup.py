@@ -59,9 +59,9 @@ def configure_logging(log_level: str = "INFO") -> logging.Logger:
     return logger
 
 
-def attach_log_file(logger: logging.Logger, output_dir: Path) -> Path:
-    """Schreibt ab sofort zusätzlich nach ``<output_dir>/conversion.log`` (UTF-8)."""
-    path = output_dir / LOG_FILE_NAME
+def attach_log_file(logger: logging.Logger, output_dir: Path, filename: str = LOG_FILE_NAME) -> Path:
+    """Schreibt ab sofort zusätzlich nach ``<output_dir>/<filename>`` (UTF-8)."""
+    path = output_dir / filename
     logger.addHandler(_make_handler(logging.FileHandler(path, encoding="utf-8"), logger.level))
     return path
 
