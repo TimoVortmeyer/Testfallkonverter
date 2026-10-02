@@ -146,7 +146,15 @@ class XrayImportRenderer:
         return expected
 
     def render_labels(self, test_case: TestCase) -> list[str]:
-        return list(test_case.labels)
+        labels: list[str] = []
+        seen: set[str] = set()
+        for label in test_case.labels:
+            sanitized = "".join("_" if character.isspace() else character for character in label)[:255]
+            key = sanitized.casefold()
+            if sanitized and key not in seen:
+                labels.append(sanitized)
+                seen.add(key)
+        return labels
 
     def render_components(self, test_case: TestCase) -> list[str]:
         return []

@@ -35,7 +35,7 @@ def test_erfolgreiche_verarbeitung_einer_docx(input_dir: Path, output_dir: Path,
         "|Kurzbeschreibung|Es wird ein Beispiel geprüft.|\n"
         "|Voraussetzungen|Stammdaten sind vorhanden.|"
     )
-    assert testcase["labels"] == ["RWWS", "Max Mustermann"] and testcase["components"] == []
+    assert testcase["labels"] == ["RWWS", "Max_Mustermann"] and testcase["components"] == []
     assert "reporter_email" not in testcase
     assert testcase["custom_fields"] == {
         "customfield_15909": "03.02 Einkaufsverwaltung/03.02.001 Pflege Einkaufskonditionen/Prüfung der/Beispielkonditionen"
@@ -99,16 +99,33 @@ def test_poc_beispiel_wird_weiterhin_verarbeitet(input_dir: Path, output_dir: Pa
     assert testcase["steps"][0]["expected_result"] == "Maske erscheint"
 
 
-def test_nicht_leerer_output_ordner_bricht_global_ab(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+def test_nicht_leerer_output_ordner_wird_nach_abfrage_beibehalten(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert, monkeypatch: pytest.MonkeyPatch
+) -> None:
     build_lunar_docx(input_dir / "a.docx")
     output_dir.mkdir()
     existing = output_dir / "alt.txt"
     existing.write_text("bestehend", encoding="utf-8")
+    monkeypatch.setattr("builtins.input", lambda _: "nein")
 
     assert run_convert() == 2
 
     assert sorted(p.name for p in output_dir.iterdir()) == ["alt.txt"]
     assert existing.read_text(encoding="utf-8") == "bestehend"
+
+
+def test_nicht_leerer_output_ordner_wird_nach_bestaetigung_geloescht(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    build_lunar_docx(input_dir / "a.docx")
+    output_dir.mkdir()
+    (output_dir / "alt.txt").write_text("alt", encoding="utf-8")
+    monkeypatch.setattr("builtins.input", lambda _: "ja")
+
+    assert run_convert() == 0
+
+    assert sorted(path.name for path in output_dir.iterdir()) == ["a", "conversion-report.json", "conversion.log"]
+    assert not (output_dir / "alt.txt").exists()
 
 
 def test_nicht_existierender_output_ordner_wird_angelegt(input_dir: Path, tmp_path: Path, run_convert: RunConvert) -> None:

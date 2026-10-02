@@ -59,7 +59,7 @@ def run_conversion(options: ConversionOptions, logger: logging.Logger) -> BatchR
     profiles = _select_profiles(load_profiles(options.config_dir), options.profile_id)
     schema = load_schema(options.schema_path)
     responsible_email_mapping = load_responsible_email_mapping(options.responsibles_csv)
-    prepare_output_directory(options.output_dir)
+    prepare_output_directory(options.output_dir, protected_dir=options.input_dir)
     attach_log_file(logger, options.output_dir)
 
     report = BatchReport(

@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
+import sys
 import uuid
 from pathlib import Path
 
@@ -32,23 +34,54 @@ def sanitize_folder_name(stem: str) -> str:
     return safe
 
 
-def prepare_output_directory(output_dir: Path) -> None:
-    """Preflight: Der Output-Basisordner wird angelegt oder muss leer sein."""
+def prepare_output_directory(output_dir: Path, protected_dir: Path | None = None) -> None:
+    """Output vorbereiten; bestehende Inhalte nur nach ausdrücklicher Bestätigung löschen."""
+    if protected_dir is not None:
+        resolved_output = output_dir.resolve()
+        resolved_protected = protected_dir.resolve()
+        if resolved_output == resolved_protected or resolved_protected.is_relative_to(resolved_output):
+            raise OutputDirectoryError(
+                f"Output-Ordner '{output_dir}' ist der Eingabeordner oder ein übergeordneter Ordner. "
+                "Dieser Pfad darf nicht zum Löschen freigegeben werden."
+            )
     if output_dir.exists():
         if not output_dir.is_dir():
             raise OutputDirectoryError(f"Output-Pfad '{output_dir}' existiert, ist aber kein Ordner.")
         entries = sorted(entry.name for entry in output_dir.iterdir())
         if entries:
             shown = ", ".join(entries[:5]) + (" …" if len(entries) > 5 else "")
-            raise OutputDirectoryError(
-                f"Output-Ordner '{output_dir}' ist nicht leer ({len(entries)} Einträge: {shown}). "
-                "Der Lauf wird abgebrochen, es wird nichts überschrieben. Bitte einen leeren oder neuen Ordner angeben."
+            print(
+                f"WARNUNG: Output-Ordner '{output_dir}' ist nicht leer "
+                f"({len(entries)} Einträge: {shown}). Bei Bestätigung wird der gesamte Ordner gelöscht.",
+                file=sys.stderr,
             )
+            try:
+                answer = input("Soll der Output-Ordner einschließlich aller Inhalte gelöscht werden? [ja/N]: ")
+            except EOFError:
+                answer = ""
+            if answer.strip().casefold() not in {"j", "ja"}:
+                raise OutputDirectoryError(f"Lauf abgebrochen; Output-Ordner '{output_dir}' wurde nicht gelöscht.")
+            try:
+                shutil.rmtree(output_dir, onerror=_remove_readonly)
+                output_dir.mkdir(parents=True)
+            except OSError as exc:
+                raise OutputDirectoryError(
+                    f"Output-Ordner '{output_dir}' konnte nicht vollständig gelöscht und neu angelegt werden.",
+                    details=str(exc),
+                ) from exc
         return
     try:
         output_dir.mkdir(parents=True)
     except OSError as exc:
         raise OutputDirectoryError(f"Output-Ordner '{output_dir}' konnte nicht angelegt werden.", details=str(exc)) from exc
+
+
+def _remove_readonly(function, path, exc_info) -> None:
+    error = exc_info[1]
+    if not isinstance(error, PermissionError):
+        raise error
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
 
 
 def publish_directory(staged_dir: Path, final_dir: Path) -> None:

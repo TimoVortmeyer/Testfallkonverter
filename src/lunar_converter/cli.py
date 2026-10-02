@@ -48,7 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     convert.add_argument("--input-dir", required=True, type=Path, help="Eingabeordner mit .docx-/.doc-Dateien (inkl. Unterordner).")
-    convert.add_argument("--output-dir", required=True, type=Path, help="Output-Basisordner; muss leer sein oder wird angelegt.")
+    convert.add_argument(
+        "--output-dir",
+        required=True,
+        type=Path,
+        help="Output-Basisordner; bei nichtleeren Ordnern wird vor dem Löschen aller Inhalte nachgefragt.",
+    )
     convert.add_argument(
         "--profile",
         default=None,

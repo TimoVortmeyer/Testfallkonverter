@@ -219,8 +219,10 @@ Vor jeder Dateiverarbeitung (Preflight):
 
 1. Ordner existiert nicht → wird angelegt.
 2. Ordner existiert und ist leer → wird verwendet.
-3. Ordner enthält Dateien oder Unterordner → **gesamter Lauf bricht ab**
-   (Exit-Code 2), es wird nichts geschrieben oder überschrieben.
+3. Ordner enthält Dateien oder Unterordner → Warnung und Nachfrage. Nur bei
+  ausdrücklicher Eingabe `ja` wird der gesamte Output-Ordner rekursiv gelöscht
+  und neu angelegt; andernfalls bricht der Lauf ab. Eingabeordner und seine
+  übergeordneten Ordner sind vor dieser Löschung geschützt.
 
 Nach erfolgreichem Preflight entstehen zusätzlich `conversion.log` und
 `conversion-report.json` im Output-Ordner. Das gilt auch für `--dry-run`; für
@@ -357,6 +359,8 @@ globale Screenshots exportiert.
 Bekannte Jira-Emoticon-Kürzel in Quelldaten werden escaped, damit Jira sie als
 Text darstellt. Word-Checkboxen in der Info-Tabelle werden gezielt als `(/)`
 (angekreuzt) bzw. `(x)` (leer) ausgegeben.
+Labels ersetzen Whitespace durch `_` und werden auf maximal 255 Zeichen gekürzt;
+zulässig sind im Import 1 bis 255 Zeichen ohne Whitespace.
 
 Beispiel:
 

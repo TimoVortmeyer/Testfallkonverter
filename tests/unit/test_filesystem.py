@@ -23,14 +23,40 @@ def test_sanitize_folder_name(stem: str, expected: str) -> None:
     assert sanitize_folder_name(stem) == expected
 
 
-def test_prepare_output_directory_legt_an_und_prueft_leer(tmp_path: Path) -> None:
+def test_prepare_output_directory_legt_an_und_bricht_bei_abgelehnter_loeschung_ab(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "neu" / "out"
     prepare_output_directory(target)
     assert target.is_dir()
     prepare_output_directory(target)
     (target / "x").mkdir()
+    monkeypatch.setattr("builtins.input", lambda _: "nein")
     with pytest.raises(OutputDirectoryError):
         prepare_output_directory(target)
+    assert (target / "x").is_dir()
+
+
+def test_prepare_output_directory_loescht_nach_bestaetigung(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "out"
+    (target / "nested").mkdir(parents=True)
+    (target / "nested" / "old.txt").write_text("old", encoding="utf-8")
+    monkeypatch.setattr("builtins.input", lambda _: "ja")
+
+    prepare_output_directory(target)
+
+    assert target.is_dir()
+    assert list(target.iterdir()) == []
+
+
+def test_prepare_output_directory_schuetzt_eingabeordner(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "input"
+    source = target / "source.docx"
+    target.mkdir()
+    source.write_text("source", encoding="utf-8")
+    monkeypatch.setattr("builtins.input", lambda _: pytest.fail("Es darf keine Löschbestätigung abgefragt werden."))
+
+    with pytest.raises(OutputDirectoryError, match="Eingabeordner"):
+        prepare_output_directory(target, protected_dir=target)
+    assert source.is_file()
 
 
 def test_prepare_output_directory_datei_statt_ordner(tmp_path: Path) -> None:

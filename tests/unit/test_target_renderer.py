@@ -59,6 +59,16 @@ def test_renderer_komplett() -> None:
     assert [w.code for w in assignment.warnings] == ["image_assignment_unclear"]
 
 
+def test_labels_ersetzen_whitespace_und_begrenzen_laenge() -> None:
+    case = _test_case()
+    case.labels = ["FICO-EH", "RWWS Team", "Årea_2/东", "x" * 300, "x" * 255, "RWWS_Team"]
+
+    rendered = XrayImportRenderer().render_labels(case)
+    assert rendered[:3] == ["FICO-EH", "RWWS_Team", "Årea_2/东"]
+    assert rendered[3] == "x" * 255
+    assert len(rendered) == 4
+
+
 def test_nicht_exportierte_bilder_erhalten_keinen_anker() -> None:
     assignment = assign_images(_test_case(), {1: "0001.png"})
     payload = XrayImportRenderer().render(_test_case(), assignment, "a")

@@ -10,7 +10,10 @@
   "properties": {
     "summary": {"type": "string", "minLength": 1},
     "description": {"type": "string"},
-    "labels": {"type": "array", "items": {"type": "string"}},
+    "labels": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^\\S{1,255}$"}
+    },
     "components": {"type": "array", "items": {"type": "string"}},
     "custom_fields": {"type": "object"},
     "reporter_email": {"type": "string", "minLength": 1},
