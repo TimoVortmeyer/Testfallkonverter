@@ -12,7 +12,7 @@ from tests.fixtures.docx_factory import DocSpec, build_lunar_docx
 from tests.helpers import CONFIG_DIR
 
 
-def test_preflight_schreibt_profiltreffer_und_pruefgruende(tmp_path: Path) -> None:
+def test_preflight_schreibt_profiltreffer_und_pruefgruende(tmp_path: Path, capsys) -> None:
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     build_lunar_docx(input_dir / "treffer.docx")
@@ -22,6 +22,10 @@ def test_preflight_schreibt_profiltreffer_und_pruefgruende(tmp_path: Path) -> No
     result = main(["preflight", "--input-dir", str(input_dir), "--csv-path", str(csv_path), "--config-dir", str(CONFIG_DIR)])
 
     assert result == 1
+    terminal = capsys.readouterr().out
+    assert "Profil-Preflight [############------------] 1/2 (50%)" in terminal
+    assert "Profil-Preflight [########################] 2/2 (100%)" in terminal
+    assert "Gesamt ~" in terminal and "Rest ~" in terminal
     with csv_path.open(encoding="utf-8-sig", newline="") as source:
         rows = {row["datei"]: row for row in csv.DictReader(source, delimiter=";")}
     assert rows["treffer.docx"]["status"] == "matched"
@@ -36,7 +40,7 @@ def test_preflight_schreibt_profiltreffer_und_pruefgruende(tmp_path: Path) -> No
     assert "Ende des Profil-Preflights" in log_content
 
 
-def test_preflight_konvertiert_doc_nur_temporär(tmp_path: Path, monkeypatch) -> None:
+def test_preflight_konvertiert_doc_nur_temporär(tmp_path: Path, monkeypatch, capsys) -> None:
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     source_doc = input_dir / "beispiel.doc"
@@ -57,6 +61,7 @@ def test_preflight_konvertiert_doc_nur_temporär(tmp_path: Path, monkeypatch) ->
     result = main(["preflight", "--input-dir", str(input_dir), "--csv-path", str(csv_path), "--config-dir", str(CONFIG_DIR)])
 
     assert result == 0
+    assert "Konvertiere DOC nach DOCX" in capsys.readouterr().out
     assert converted == [source_doc]
     assert source_doc.read_bytes() == b"fake doc"
     with csv_path.open(encoding="utf-8-sig", newline="") as source:

@@ -15,6 +15,8 @@ from typing import Any
 import pytest
 
 from lunar_converter import doc_converter
+from lunar_converter.cli import main
+from lunar_converter.exceptions import ConfigurationError
 from tests.fixtures.docx_factory import DocSpec, build_lunar_docx
 from tests.helpers import RunConvert, error_codes, file_entry, final_entries, load_report, load_testcase
 
@@ -42,7 +44,12 @@ def _fake_run_factory(source_docx: Path, calls: list[list[str]], *, returncode: 
 
 @pytest.mark.usefixtures("powershell_found")
 def test_doc_wird_mit_word_umgewandelt(
-    input_dir: Path, output_dir: Path, tmp_path: Path, run_convert: RunConvert, monkeypatch: pytest.MonkeyPatch
+    input_dir: Path,
+    output_dir: Path,
+    tmp_path: Path,
+    run_convert: RunConvert,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
 ) -> None:
     template = build_lunar_docx(tmp_path / "vorlage.docx", DocSpec(name="TF_aus_DOC"))
     (input_dir / "Alt Format ä.doc").write_bytes(b"\xd0\xcf\x11\xe0 binaeres Word")
@@ -50,6 +57,7 @@ def test_doc_wird_mit_word_umgewandelt(
     monkeypatch.setattr(doc_converter.subprocess, "run", _fake_run_factory(template, calls))
 
     assert run_convert() == 0
+    assert "Konvertiere DOC nach DOCX" in capsys.readouterr().out
 
     command = calls[0]
     assert command[0] == r"C:\PS\pwsh.exe"
@@ -113,6 +121,58 @@ def test_powershell_nicht_verfuegbar(input_dir: Path, output_dir: Path, run_conv
     report = load_report(output_dir)
     assert error_codes(file_entry(report, "a.doc")) == ["doc_conversion_failed"]
     assert file_entry(report, "b.docx")["status"] == "success"
+
+
+def test_stapelvorbereitung_nutzt_rekursive_progress_optionen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_dir = tmp_path / "input"
+    (input_dir / "Bereich").mkdir(parents=True)
+    (input_dir / "a.docx").write_bytes(b"docx")
+    (input_dir / "Bereich" / "b.doc").write_bytes(b"doc")
+    output_dir = tmp_path / "prepared"
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(doc_converter.shutil, "which", lambda name: r"C:\PS\pwsh.exe" if name == "pwsh" else None)
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(doc_converter.subprocess, "run", fake_run)
+
+    total, result = doc_converter.prepare_docx_directory(input_dir, output_dir)
+
+    assert (total, result) == (2, 0)
+    command, kwargs = calls[0]
+    assert command[command.index("-InputDir") + 1] == str(input_dir)
+    assert command[command.index("-OutputDir") + 1] == str(output_dir)
+    assert command[-2:] == ["-Recurse", "-ShowProgress"]
+    assert kwargs["capture_output"] is False
+    assert output_dir.is_dir()
+
+
+def test_stapelvorbereitung_schuetzt_ueberlappende_ordner(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.docx").write_bytes(b"docx")
+
+    with pytest.raises(ConfigurationError, match="ineinander liegen"):
+        doc_converter.prepare_docx_directory(input_dir, input_dir / "prepared")
+
+
+def test_prepare_docx_mirrors_subdirectories(tmp_path: Path) -> None:
+    if doc_converter.shutil.which("pwsh") is None and doc_converter.shutil.which("powershell") is None:
+        pytest.skip("PowerShell nicht verfügbar")
+    input_dir = tmp_path / "input"
+    first = build_lunar_docx(input_dir / "a.docx")
+    nested = build_lunar_docx(input_dir / "Bereich" / "b.docx")
+    output_dir = tmp_path / "prepared"
+
+    result = main(["prepare-docx", "--input-dir", str(input_dir), "--output-dir", str(output_dir)])
+
+    assert result == 0
+    assert (output_dir / "a.docx").read_bytes() == first.read_bytes()
+    assert (output_dir / "Bereich" / "b.docx").read_bytes() == nested.read_bytes()
 
 
 def test_libreoffice_parameter_existiert_nicht(run_convert: RunConvert) -> None:

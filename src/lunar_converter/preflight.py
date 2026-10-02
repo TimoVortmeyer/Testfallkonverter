@@ -16,6 +16,7 @@ from .logging_setup import attach_log_file, context_logger
 from .models import ProfileDefinition
 from .profile_detector import detect_profile
 from .profile_loader import load_profiles
+from .progress import TerminalProgress
 from .source_discovery import discover_source_files, relative_display_path
 
 CSV_FIELDS = (
@@ -50,16 +51,22 @@ def run_preflight(input_dir: Path, csv_path: Path, config_dir: Path, logger: log
         )
         if not files:
             logger.warning("Im Eingabeordner und seinen Unterordnern wurden keine .docx- oder .doc-Dateien gefunden.")
+        progress = TerminalProgress("Profil-Preflight", len(files))
         with csv_path.open("w", encoding="utf-8-sig", newline="") as output:
             writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, delimiter=";")
             writer.writeheader()
             failed = 0
-            for source in files:
+            for position, source in enumerate(files):
+                relative_path = relative_display_path(source, input_dir)
+                status = "Konvertiere DOC nach DOCX" if source.suffix.casefold() == ".doc" else "Prüfe Profile"
+                progress.update(position, current=relative_path, status=status)
                 row = _check_file(source, input_dir, profiles)
                 writer.writerow(row)
                 if row["status"] != "matched":
                     failed += 1
                 _log_result(logger, row)
+                progress.update(position + 1, current=relative_path, status=str(row["status"]))
+            progress.finish()
             logger.info(
                 "Ende des Profil-Preflights: %d gesamt, %d eindeutig erkannt, %d ohne eindeutigen Treffer. CSV: %s",
                 len(files),

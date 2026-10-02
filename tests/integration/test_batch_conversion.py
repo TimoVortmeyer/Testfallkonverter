@@ -6,6 +6,7 @@ import csv
 from pathlib import Path
 
 from lunar_converter.cli import main
+from lunar_converter import responsibles
 from tests.fixtures.docx_factory import PNG, DocSpec, StepSpec, build_lunar_docx, build_poc_sample_docx
 from tests.helpers import (
     CONFIG_DIR,
@@ -19,13 +20,18 @@ from tests.helpers import (
 )
 
 
-def test_erfolgreiche_verarbeitung_einer_docx(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+def test_erfolgreiche_verarbeitung_einer_docx(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert, capsys
+) -> None:
     build_lunar_docx(
         input_dir / "TFB_03.03.004_EH_012_MDE_Direktbestellung.docx",
         DocSpec(steps=[StepSpec(actual="Wie erwartet.")]),
     )
 
     assert run_convert() == 0
+    terminal = capsys.readouterr().out
+    assert "Konvertierung [########################] 1/1 (100%)" in terminal
+    assert "Gesamt ~" in terminal and "Rest ~" in terminal
 
     testcase = load_testcase(output_dir, "TFB_03.03.004_EH_012_MDE_Direktbestellung")
     assert testcase["summary"] == "TFB_03.03.004_EH_012_MDE_Direktbestellung"
@@ -81,6 +87,42 @@ def test_responsibles_csv_fuellt_reporter_email_oder_label(
     unmapped = load_testcase(output_dir, "Konditionen")
     assert "reporter_email" not in unmapped
     assert unmapped["labels"] == ["RWWS", "SKA"]
+
+
+def test_verantwortliche_command_zeigt_fortschritt(tmp_path: Path, capsys) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    build_lunar_docx(input_dir / "mit_verantwortlichem.docx", DocSpec(responsible="Max Mustermann"))
+    csv_path = tmp_path / "verantwortliche.csv"
+
+    assert main(["verantwortliche", "--input-dir", str(input_dir), "--csv-path", str(csv_path)]) == 0
+
+    terminal = capsys.readouterr().out
+    assert "Verantwortliche [########################] 1/1 (100%)" in terminal
+    assert "Gesamt ~" in terminal and "Rest ~" in terminal
+
+
+def test_verantwortliche_command_zeigt_doc_konvertierungsstatus(
+    tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    source_doc = input_dir / "mit_verantwortlichem.doc"
+    source_doc.write_bytes(b"fake doc")
+    template = build_lunar_docx(tmp_path / "template.docx", DocSpec(responsible="Max Mustermann"))
+
+    def fake_convert(source: Path, work_dir: Path) -> Path:
+        output = work_dir / "fake.docx"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(template.read_bytes())
+        return output
+
+    monkeypatch.setattr(responsibles, "convert_doc_to_docx", fake_convert)
+    csv_path = tmp_path / "verantwortliche.csv"
+
+    assert main(["verantwortliche", "--input-dir", str(input_dir), "--csv-path", str(csv_path)]) == 0
+
+    assert "Konvertiere DOC nach DOCX" in capsys.readouterr().out
 
 
 def test_poc_beispiel_wird_weiterhin_verarbeitet(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:

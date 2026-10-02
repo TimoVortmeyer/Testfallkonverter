@@ -14,6 +14,7 @@ from .docx_reader import read_docx
 from .exceptions import ConfigurationError, LunarConverterError
 from .logging_setup import attach_log_file, context_logger
 from .models import SourceDocument, SourceParagraph, SourceTable
+from .progress import TerminalProgress
 from .source_discovery import discover_source_files, relative_display_path
 
 _LABEL = re.compile(r"^Verantwortliche(?:r|s)?(?:\s+Team)?\s*[:\t]\s*(.+)$", re.IGNORECASE)
@@ -130,9 +131,13 @@ def export_responsibles(input_dir: Path, csv_path: Path, logger: logging.Logger)
         logger.warning("Im Eingabeordner und seinen Unterordnern wurden keine .docx- oder .doc-Dateien gefunden.")
     rows: list[tuple[str, str]] = []
     failures = 0
-    for source in files:
+    progress = TerminalProgress("Verantwortliche", len(files))
+    for position, source in enumerate(files):
         relative_path = relative_display_path(source, input_dir)
         log = context_logger(logger, relative_path)
+        status = "Konvertiere DOC nach DOCX" if source.suffix.casefold() == ".doc" else "Lese Deckblatt"
+        progress.update(position, current=relative_path, status=status)
+        file_failed = False
         try:
             with tempfile.TemporaryDirectory(prefix="lunar_verantwortliche_") as temp_dir:
                 docx_path = source
@@ -145,7 +150,10 @@ def export_responsibles(input_dir: Path, csv_path: Path, logger: logging.Logger)
             log.info("Verantwortliche gefunden: %s.", "; ".join(names))
         except (LunarConverterError, OSError, ValueError) as exc:
             failures += 1
+            file_failed = True
             log.error("Verantwortliche konnten nicht erfasst werden: %s", exc)
+        progress.update(position + 1, current=relative_path, status="Fehler" if file_failed else "gelesen")
+    progress.finish()
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         with csv_path.open("x", encoding="utf-8-sig", newline="") as output:

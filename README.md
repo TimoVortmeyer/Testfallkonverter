@@ -116,6 +116,30 @@ Voraussetzung: Python 3.11 oder neuer.
 
 ## 6. CLI
 
+### DOC/DOCX-Dateien einmalig vorbereiten
+
+Wenn der Eingabeordner `.doc`-Dateien enthält, empfiehlt sich die einmalige
+Vorbereitung vor Preflight, Verantwortlichen-Erfassung und Konvertierung. So
+muss Word die alten Dateien nicht in jedem späteren Prozess erneut konvertieren:
+
+```powershell
+.\start_testfallkonverter.cmd prepare-docx --input-dir .\input --output-dir .\input_docx
+```
+
+Die Ordnerstruktur wird im Ziel gespiegelt. `.doc` wird mit Microsoft Word zu
+`.docx` konvertiert, vorhandene `.docx` werden kopiert. Erkennt der Prozess
+VBA-Makros, speichert er die Zielkopie als makrofreies `.docx`. Andere aktive
+oder eingebettete Inhalte werden nicht gezielt entfernt. Die Quelldateien
+bleiben unverändert. Für die folgenden Prozesse verwendest du den Zielordner
+als Eingabe. Der PowerShell-Fortschrittsbalken zeigt Dateien, Status und
+Zeitprognose.
+
+```powershell
+.\start_testfallkonverter.cmd preflight --input-dir .\input_docx --csv-path .\output\preflight.csv
+.\start_testfallkonverter.cmd verantwortliche --input-dir .\input_docx --csv-path .\output\verantwortliche.csv
+.\start_testfallkonverter.cmd convert --input-dir .\input_docx --output-dir .\output\lauf1
+```
+
 ### Profile vorab prüfen
 
 Der Preflight prüft rekursiv alle `.docx`- und `.doc`-Dateien gegen alle Profile
@@ -188,7 +212,7 @@ python -m lunar_converter convert `
 | Parameter | Pflicht | Bedeutung |
 |---|---|---|
 | `--input-dir` | ja | Eingabeordner mit `.docx`/`.doc`, inklusive Unterordner |
-| `--output-dir` | ja | Output-Basisordner (muss leer sein oder wird angelegt) |
+| `--output-dir` | ja | Output-Basisordner; bei vorhandenen Inhalten wird nach Bestätigung gefragt |
 | `--profile <id>` | nein | Nur dieses Profil prüfen (Debugging/Migration), kein Fallback |
 | `--log-level` | nein | `DEBUG`, `INFO` (Standard), `WARNING`, `ERROR` |
 | `--dry-run` | nein | Analysieren und validieren, keine Exportdaten schreiben |
@@ -196,6 +220,11 @@ python -m lunar_converter convert `
 | `--schema-path` | nein | JSON-Schema, Standard `schema/testcase.schema.json` |
 | `--config-dir` | nein | Konfigurationsordner mit `profiles/`, Standard `config/` |
 | `--responsibles-csv` | nein | Optionale Verantwortlichen-CSV mit E-Mail-Adressen |
+
+Preflight, Verantwortlichen-Erfassung und Konvertierung zeigen im Terminal je
+Datei Status, Fortschritt sowie geschätzte Gesamt- und Restzeit. Die Schätzung
+verfeinert sich nach den ersten abgeschlossenen Dateien. Bei `.doc` zeigt der
+Status die temporäre Konvertierung nach `.docx` vor dem Auslesen an.
 
 Beispiele:
 

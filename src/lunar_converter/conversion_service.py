@@ -25,6 +25,7 @@ from .lunar_parser import parse_test_case
 from .models import Issue, ProfileDefinition
 from .profile_detector import DetectionResult, detect_profile
 from .profile_loader import load_profiles
+from .progress import TerminalProgress
 from .reporting import BatchReport, FileReport, now_iso, write_report
 from .responsibles import ResponsibleEmailMapping, load_responsible_email_mapping, responsible_mapping_key
 from .source_discovery import discover_source_files, relative_display_path
@@ -82,17 +83,28 @@ def run_conversion(options: ConversionOptions, logger: logging.Logger) -> BatchR
             logger.warning("Im Eingabeordner und seinen Unterordnern wurden keine .docx- oder .doc-Dateien gefunden.")
         # Ordnername (casefold) -> Quelldatei, die ihn belegt; der Output bleibt flach.
         used_folder_names: dict[str, str] = {}
+        progress = TerminalProgress("Konvertierung", len(files))
         for position, source in enumerate(files):
+            relative_path = relative_display_path(source, options.input_dir)
+            status = "Konvertiere DOC nach DOCX" if source.suffix.casefold() == ".doc" else "Verarbeite DOCX"
+            progress.update(position, current=relative_path, status=status)
             file_report = converter.convert(source, used_folder_names)
             report.files.append(file_report)
+            progress.update(position + 1, current=relative_path, status=file_report.status)
             if file_report.status == "failed" and options.fail_fast:
                 for remaining in files[position + 1 :]:
                     report.files.append(_skipped_report(remaining))
+                    progress.update(
+                        len(report.files),
+                        current=relative_display_path(remaining, options.input_dir),
+                        status="übersprungen",
+                    )
                     context_logger(logger, relative_display_path(remaining, options.input_dir)).warning(
                         "Übersprungen wegen --fail-fast."
                     )
                 logger.error("Abbruch nach erstem Dateifehler (--fail-fast).")
                 break
+            progress.finish()
     finally:
         report.finished_at = now_iso()
         report_path = write_report(report, options.output_dir)

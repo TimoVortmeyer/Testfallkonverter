@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .conversion_service import ConversionOptions, run_conversion
+from .doc_converter import prepare_docx_directory
 from .exceptions import LunarConverterError
 from .logging_setup import configure_logging, shutdown_logging
 from .preflight import run_preflight
@@ -33,6 +34,19 @@ def build_parser() -> argparse.ArgumentParser:
         description="Konvertiert LUNAR-Testdokumente (.docx/.doc) in Import-JSON für den vorhandenen Jira/Xray-Importprozess.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="BEFEHL")
+
+    prepare = subparsers.add_parser(
+        "prepare-docx",
+        help="Bereitet DOC/DOCX rekursiv als makrofreie DOCX-Zielstruktur vor.",
+        description=(
+            "Konvertiert .doc-Dateien gesammelt mit Microsoft Word, kopiert vorhandene .docx-Dateien "
+            "und entfernt erkannte VBA-Makros aus den Zielkopien. Die Unterordnerstruktur bleibt erhalten. "
+            "Dieser Schritt ist als einmalige Vorbereitung vor Preflight, Verantwortlichen-Erfassung und "
+            "Konvertierung gedacht."
+        ),
+    )
+    prepare.add_argument("--input-dir", required=True, type=Path, help="Wurzelordner mit .doc/.docx-Dateien.")
+    prepare.add_argument("--output-dir", required=True, type=Path, help="Zielordner für die vorbereitete DOCX-Struktur.")
 
     convert = subparsers.add_parser(
         "convert",
@@ -100,6 +114,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "prepare-docx":
+        try:
+            total, result = prepare_docx_directory(args.input_dir, args.output_dir)
+        except LunarConverterError as exc:
+            print(f"DOCX-Vorbereitung abgebrochen ({exc.code}): {exc.message}", file=sys.stderr)
+            if exc.details:
+                print(exc.details, file=sys.stderr)
+            return EXIT_GLOBAL_ERROR
+        if total == 0:
+            print("DOCX-Vorbereitung: keine Word-Dateien gefunden.")
+            return EXIT_OK
+        print(f"DOCX-Vorbereitung abgeschlossen: {total} Quelldatei(en), PowerShell-Exitcode {result}.")
+        return result if result in {EXIT_OK, EXIT_FILE_ERRORS, EXIT_GLOBAL_ERROR} else EXIT_GLOBAL_ERROR
+
     if args.command == "verantwortliche":
         logger = configure_logging(args.log_level)
         try:

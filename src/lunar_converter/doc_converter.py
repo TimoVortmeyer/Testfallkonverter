@@ -12,7 +12,9 @@ import subprocess
 from importlib.resources import as_file, files
 from pathlib import Path
 
-from .exceptions import DocConversionError
+from .exceptions import ConfigurationError, DocConversionError
+from .filesystem import prepare_output_directory
+from .source_discovery import discover_source_files
 
 POWERSHELL_EXECUTABLES: tuple[str, ...] = ("pwsh", "powershell")
 WORD_SCRIPT_NAME = "convert_doc_to_docx.ps1"
@@ -30,8 +32,16 @@ def find_powershell() -> Path:
     )
 
 
-def build_conversion_command(powershell: Path, script: Path, input_dir: Path, output_dir: Path) -> list[str]:
-    return [
+def build_conversion_command(
+    powershell: Path,
+    script: Path,
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    recursive: bool = False,
+    show_progress: bool = False,
+) -> list[str]:
+    command = [
         str(powershell),
         "-NoProfile",
         "-NonInteractive",
@@ -42,6 +52,11 @@ def build_conversion_command(powershell: Path, script: Path, input_dir: Path, ou
         "-OutputDir",
         str(output_dir),
     ]
+    if recursive:
+        command.append("-Recurse")
+    if show_progress:
+        command.append("-ShowProgress")
+    return command
 
 
 def convert_doc_to_docx(source: Path, work_dir: Path) -> Path:
@@ -83,3 +98,51 @@ def convert_doc_to_docx(source: Path, work_dir: Path) -> Path:
     if not expected_output.is_file() or expected_output.stat().st_size == 0:
         raise DocConversionError(f"Word hat für '{source.name}' keine DOCX-Datei erzeugt.", details=details)
     return expected_output
+
+
+def prepare_docx_directory(input_dir: Path, output_dir: Path) -> tuple[int, int]:
+    """Bereitet rekursiv alle Word-Dateien in einer gespiegelten DOCX-Struktur vor.
+
+    Rückgabe: (Anzahl Quelldateien, PowerShell-Exitcode).
+    """
+    if not input_dir.is_dir():
+        raise ConfigurationError(f"Eingabeordner '{input_dir}' existiert nicht oder ist kein Ordner.")
+    source_root = input_dir.resolve()
+    target_root = output_dir.resolve()
+    if (
+        source_root == target_root
+        or source_root.is_relative_to(target_root)
+        or target_root.is_relative_to(source_root)
+    ):
+        raise ConfigurationError("Eingabe- und Ausgabeordner dürfen nicht identisch sein oder ineinander liegen.")
+
+    source_files = discover_source_files(input_dir)
+    if not source_files:
+        return 0, 0
+    prepare_output_directory(output_dir, protected_dir=input_dir)
+    powershell = find_powershell()
+
+    with as_file(files("lunar_converter").joinpath("resources").joinpath(WORD_SCRIPT_NAME)) as script:
+        command = build_conversion_command(
+            powershell,
+            script,
+            input_dir,
+            output_dir,
+            recursive=True,
+            show_progress=True,
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=False,
+                text=True,
+                timeout=CONVERSION_TIMEOUT_SECONDS * len(source_files),
+                env={**os.environ, "LUNAR_UTF8_OUTPUT": "1"},
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise DocConversionError(
+                "Die Stapelvorbereitung der Word-Dateien konnte nicht ausgeführt werden.",
+                details=f"Befehl: {command}\n{type(exc).__name__}: {exc}",
+            ) from exc
+    return len(source_files), completed.returncode
