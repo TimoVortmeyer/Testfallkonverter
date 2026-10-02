@@ -26,7 +26,7 @@ def test_gh_vorlage_wird_erkannt_und_exportiert(input_dir: Path, output_dir: Pat
 
     testcase = load_testcase(output_dir, "gh")
     assert testcase["summary"] == "gh"
-    assert testcase["labels"] == ["RWWS-GH"]
+    assert testcase["labels"] == ["RWWS-GH", "Erika Muster"]
     assert testcase["custom_fields"] == {
         "customfield_15909": "03.02 Einkaufsverwaltung/03.02.001 GH Pflege Einkaufskonditionen (EGKE)/MEK1 - EK-Konditionen anlegen"
     }

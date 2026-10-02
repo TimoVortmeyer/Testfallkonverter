@@ -61,9 +61,12 @@ PowerShell-Ressource `resources/convert_doc_to_docx.ps1`.
   (Abschnitt 4) und danach wie `.docx` verarbeitet.
 
 Verarbeitet werden alle Dateien mit diesen Endungen (Groß-/Kleinschreibung egal)
-**direkt** im Eingabeordner (keine Unterordner), alphabetisch nach Dateiname.
-Temporäre Word-Dateien (`~$…`) werden ignoriert. Ein Dokument entspricht genau
-einem Testfall.
+im Eingabeordner **und in allen Unterordnern**, sortiert nach relativem Pfad
+(ohne Groß-/Kleinschreibung, z. B. `a.docx`, `Bereich B/b.docx`, `Bereich B/Tief/c.doc`).
+Temporäre Word-Dateien (`~$…`) werden ignoriert, Verzeichnisverknüpfungen
+(Symlinks/Junctions) nicht verfolgt. Liegt der Output-Ordner innerhalb des
+Eingabeordners, wird er nicht durchsucht. Im Log steht je Datei der Pfad relativ
+zum Eingabeordner. Ein Dokument entspricht genau einem Testfall.
 
 ## 4. `.doc`-Konvertierung mit Microsoft Word
 
@@ -122,7 +125,7 @@ python -m lunar_converter convert `
 
 | Parameter | Pflicht | Bedeutung |
 |---|---|---|
-| `--input-dir` | ja | Eingabeordner mit `.docx`/`.doc` |
+| `--input-dir` | ja | Eingabeordner mit `.docx`/`.doc`, inklusive Unterordner |
 | `--output-dir` | ja | Output-Basisordner (muss leer sein oder wird angelegt) |
 | `--profile <id>` | nein | Nur dieses Profil prüfen (Debugging/Migration), kein Fallback |
 | `--log-level` | nein | `DEBUG`, `INFO` (Standard), `WARNING`, `ERROR` |
@@ -173,12 +176,17 @@ Ausgabe je erfolgreicher Quelldatei:
       0002.png
 ```
 
+Der Output ist auch bei Unterordnern im Eingabeordner **flach** (eine Ebene
+Testfallordner), weil der Importer `<ordner>/*/testcase.json` liest.
+
 Der Ordnername wird ausschließlich aus dem Dateinamen gebildet (nie aus der
-Summary). Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen) und – wie im POC –
-Leerraum werden durch `_` ersetzt; reservierte Windows-Namen (`CON`, `NUL`, …)
+Summary). Auch die `summary` in `testcase.json` wird aus dem Dateinamen ohne
+`.doc`- oder `.docx`-Endung gebildet. Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen)
+und – wie im POC – Leerraum werden durch `_` ersetzt; reservierte Windows-Namen (`CON`, `NUL`, …)
 erhalten ein `_`. Ergeben zwei Quelldateien denselben Ordnernamen (z. B.
-`Test Fall.docx` und `Test_Fall.docx`), wird die alphabetisch spätere mit `output_name_conflict`
-abgelehnt.
+`Test Fall.docx` und `Test_Fall.docx` oder gleichnamige Dateien in verschiedenen
+Unterordnern), wird die in der Sortierung spätere mit `output_name_conflict`
+abgelehnt; die Meldung nennt die Datei, die den Namen bereits belegt.
 
 ## 8. Atomarer Export pro Testfall
 
@@ -274,7 +282,7 @@ Informationen und Schritttabelle:
 |---|---|---|
 | Deckblatt: Prozesszeilen (`03.02 …`, `03.02.001 …`, optional Unterprozesse `03.02.001.01 …`) | Zeilen mit Prozessnummer vor der Testfall-Zeile, in derselben Zelle bzw. demselben Absatzblock | `custom_fields.customfield_00000` (Dummy) = `"Geschäftsprozess/Szenario/Unterprozess1/…"` |
 | Deckblatt: optionale Testfallbeschreibung | Zeilen zwischen letzter Prozesszeile und Testfall-Zeile, ohne Zeilenumbrüche zusammengeführt | `description`: `h1. <Testfallbeschreibung>` |
-| Deckblatt: `Testfall: <Name>` | Alias `testfallname` | `summary` |
+| Deckblatt: `Testfall: <Name>` | Alias `testfallname` | kein Zielfeld; `summary` kommt aus dem Quelldateinamen |
 | Tabelle mit zentralen Informationen | Tabelle mit den Bezeichnern aus `info_table.required_labels`, sonst letzte Tabelle vor der Schritttabelle; nie die Deckblatt-Tabelle | an `description` angehängte Jira-Wiki-Tabelle |
 | Schritttabelle | Pflichtspalten des Profils | `steps[]` (wie bisher) |
 
@@ -282,6 +290,9 @@ Wiki-Tabelle: jede Zeile `|Zelle|Zelle|`, leere Zellen als `| |`, Zeilenumbrüch
 in Zellen als `\\`, `|` im Text als `\|`. Vollständig leere Zeilen entfallen.
 Bilder in der Tabelle werden an ihrer Position als `!0001.png!` verankert und als
 globale Screenshots exportiert.
+Bekannte Jira-Emoticon-Kürzel in Quelldaten werden escaped, damit Jira sie als
+Text darstellt. Word-Checkboxen in der Info-Tabelle werden gezielt als `(/)`
+(angekreuzt) bzw. `(x)` (leer) ausgegeben.
 
 Beispiel:
 
@@ -416,7 +427,7 @@ Fehlercodes je Datei: `input_file_error`, `doc_conversion_failed`,
 Fehler einer Datei brechen den Batch nicht ab. Mit `--fail-fast` werden die
 restlichen Dateien als `skipped` gemeldet.
 
-Pflichtregeln: `summary` (= Testfallname) nicht leer, mindestens ein Schritt,
+Pflichtregeln: `summary` (= Quelldateiname ohne `.doc`/`.docx`) nicht leer, mindestens ein Schritt,
 je Schritt `system` und `action` nicht leer. Alle Pflichtfeldfehler eines
 Dokuments werden gemeinsam gemeldet.
 
@@ -427,6 +438,7 @@ Dokuments werden gemeinsam gemeldet.
 | Erwartetes Ergebnis leer | `expected_result = "-"` (keine Warnung) |
 | Schritttabelle hat keine Systemspalte (z. B. `lunar_legacy_v1`, `gh_standard_v1`) | `system = "nicht definiert"` |
 | Systemspalte vorhanden, Zelle aber leer (z. B. Folgezeilen ohne Schritt-Nr.) | `system = "nicht definiert"` |
+| Eingabedaten vorhanden | Werden mit `\n` an `action` angehängt; `data = ""` |
 | Keine Eingabedaten-Spalte | `data = ""` |
 
 ## 15. Übergangslösung für tatsächliche Ergebnisse

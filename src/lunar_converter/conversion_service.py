@@ -26,7 +26,9 @@ from .models import Issue, ProfileDefinition
 from .profile_detector import DetectionResult, detect_profile
 from .profile_loader import load_profiles
 from .reporting import BatchReport, FileReport, now_iso, write_report
+from .responsibles import ResponsibleEmailMapping, load_responsible_email_mapping, responsible_mapping_key
 from .source_discovery import discover_source_files, relative_display_path
+from .semantic_model import TestCase
 from .target_renderer import XrayImportRenderer, write_testcase_json
 from .validator import load_schema, validate_payload
 
@@ -43,6 +45,7 @@ class ConversionOptions:
     profile_id: str | None = None
     dry_run: bool = False
     fail_fast: bool = False
+    responsibles_csv: Path | None = None
 
 
 def run_conversion(options: ConversionOptions, logger: logging.Logger) -> BatchReport:
@@ -55,6 +58,7 @@ def run_conversion(options: ConversionOptions, logger: logging.Logger) -> BatchR
         raise ConfigurationError(f"Eingabeordner '{options.input_dir}' existiert nicht oder ist kein Ordner.")
     profiles = _select_profiles(load_profiles(options.config_dir), options.profile_id)
     schema = load_schema(options.schema_path)
+    responsible_email_mapping = load_responsible_email_mapping(options.responsibles_csv)
     prepare_output_directory(options.output_dir)
     attach_log_file(logger, options.output_dir)
 
@@ -64,7 +68,7 @@ def run_conversion(options: ConversionOptions, logger: logging.Logger) -> BatchR
         dry_run=options.dry_run,
         profile_override=options.profile_id,
     )
-    converter = _FileConverter(options, profiles, schema, logger)
+    converter = _FileConverter(options, profiles, schema, logger, responsible_email_mapping)
     try:
         files = discover_source_files(options.input_dir, exclude_dir=options.output_dir)
         logger.info(
@@ -128,12 +132,14 @@ class _FileConverter:
         profiles: Sequence[ProfileDefinition],
         schema: dict[str, Any],
         logger: logging.Logger,
+        responsible_email_mapping: ResponsibleEmailMapping,
     ) -> None:
         self._options = options
         self._profiles = tuple(profiles)
         self._schema = schema
         self._logger = logger
         self._renderer = XrayImportRenderer()
+        self._responsible_email_mapping = responsible_email_mapping
 
     def convert(self, source: Path, used_folder_names: dict[str, str]) -> FileReport:
         report = FileReport(input_file=str(source))
@@ -181,6 +187,7 @@ class _FileConverter:
         log.info("Profil erkannt: %s (%s).", profile.id, profile.name)
 
         test_case = parse_test_case(document, profile)
+        self._apply_responsible_mapping(test_case, source)
         folder_name = sanitize_folder_name(source.stem)
         if folder_name.casefold() in used_folder_names:
             raise ExportError(
@@ -224,6 +231,46 @@ class _FileConverter:
         used_folder_names[folder_name.casefold()] = self._label(source)
         report.step_count = len(payload["steps"])
         report.exported_image_count = len(exported.exported)
+
+    def _apply_responsible_mapping(
+        self,
+        test_case: TestCase,
+        source: Path,
+    ) -> None:
+        if not test_case.responsible_names:
+            return
+        relative_file = relative_display_path(source, self._options.input_dir)
+        matched_emails: set[str] = set()
+        names_without_email: list[str] = []
+        for name in test_case.responsible_names:
+            emails = self._responsible_email_mapping.get(
+                responsible_mapping_key(relative_file, name), set()
+            )
+            if len(emails) == 1:
+                matched_emails.update(emails)
+            else:
+                names_without_email.append(name)
+
+        if len(matched_emails) == 1:
+            test_case.reporter_email = next(iter(matched_emails))
+        elif len(matched_emails) > 1:
+            names_without_email = list(test_case.responsible_names)
+            test_case.warnings.append(
+                Issue(
+                    code="responsible_email_ambiguous",
+                    message=(
+                        "Mehrere unterschiedliche E-Mail-Adressen sind für die "
+                        "Verantwortlichen dieser Quelldatei zugeordnet; reporter_email "
+                        "wurde nicht gesetzt und die Namen werden als Labels übernommen."
+                    ),
+                )
+            )
+
+        existing_labels = {label.casefold() for label in test_case.labels}
+        for name in names_without_email:
+            if name.casefold() not in existing_labels:
+                test_case.labels.append(name)
+                existing_labels.add(name.casefold())
 
     def _fail(self, report: FileReport, source: Path, issues: list[Issue]) -> None:
         report.status = "failed"

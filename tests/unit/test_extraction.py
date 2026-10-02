@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 from docx import Document
 from docx.oxml import parse_xml
 
 from lunar_converter.docx_reader import read_docx
+from lunar_converter.cli import main
 from lunar_converter.lunar_parser import parse_test_case
 from lunar_converter.models import ProfileDefinition, SourceTable
 from lunar_converter.profile_loader import load_profiles
+from lunar_converter.responsibles import cover_responsibles
 from lunar_converter.semantic_model import ImageMarker
 from lunar_converter.target_renderer import render_wiki_table
 from tests.fixtures.docx_factory import PNG, DocSpec, StepSpec, build_lunar_docx
@@ -19,6 +22,102 @@ from tests.helpers import CONFIG_DIR
 
 def _standard_profile() -> ProfileDefinition:
     return next(profile for profile in load_profiles(CONFIG_DIR) if profile.id == "lunar_standard_v1")
+
+
+def test_verantwortliche_aus_absatz_und_tabelle_nur_vom_deckblatt(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    text_doc = Document()
+    text_doc.add_paragraph("Testfall: TF_001")
+    text_doc.add_paragraph("Verantwortlicher: Markus Gerich")
+    text_doc.add_table(rows=1, cols=1).cell(0, 0).text = "Fachbereich: Einkauf"
+    text_doc.add_table(rows=1, cols=1).cell(0, 0).text = "Verantwortlicher: Nicht vom Deckblatt"
+    text_path = input_dir / "text.docx"
+    text_doc.save(text_path)
+
+    table_doc = Document()
+    cover = table_doc.add_table(rows=1, cols=1)
+    cover.cell(0, 0).text = "Testfall: TF_002\nVerantwortlicher: Team RWWS EH1 (SP)"
+    table_doc.add_table(rows=1, cols=1).cell(0, 0).text = "Fachbereich: Einkauf"
+    table_doc.add_table(rows=1, cols=1).cell(0, 0).text = "Verantwortlicher: Nicht vom Deckblatt"
+    table_path = input_dir / "tabelle.docx"
+    table_doc.save(table_path)
+
+    assert cover_responsibles(read_docx(text_path)) == ["Markus Gerich"]
+    assert cover_responsibles(read_docx(table_path)) == ["Team RWWS EH1 (SP)"]
+
+    csv_path = tmp_path / "verantwortliche.csv"
+    assert main(["verantwortliche", "--input-dir", str(input_dir), "--csv-path", str(csv_path)]) == 0
+    with csv_path.open(encoding="utf-8-sig", newline="") as output:
+        assert list(csv.reader(output, delimiter=";")) == [
+            ["verantwortlicher", "datei"],
+            ["Team RWWS EH1 (SP)", "tabelle.docx"],
+            ["Markus Gerich", "text.docx"],
+        ]
+    log_text = (tmp_path / "verantwortliche.verantwortliche.log").read_text(encoding="utf-8")
+    assert "Start der Verantwortlichen-Erfassung: 2 Datei(en)" in log_text
+    assert "[Datei: tabelle.docx]" in log_text
+    assert "Verantwortliche gefunden: Team RWWS EH1 (SP)." in log_text
+    assert "Ende der Verantwortlichen-Erfassung: 2 gesamt, 0 ohne Ergebnis." in log_text
+    assert main(["verantwortliche", "--input-dir", str(input_dir), "--csv-path", str(csv_path)]) == 2
+
+
+def test_verantwortliche_protokolliert_fehlenden_fund(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    document = Document()
+    document.add_paragraph("Testfall: TF_ohne_Verantwortlichen")
+    document.save(input_dir / "ohne.docx")
+    csv_path = tmp_path / "liste.csv"
+
+    assert main(["verantwortliche", "--input-dir", str(input_dir), "--csv-path", str(csv_path)]) == 1
+    log_text = (tmp_path / "liste.verantwortliche.log").read_text(encoding="utf-8")
+    assert "[Datei: ohne.docx]" in log_text
+    assert "Kein Verantwortlicher auf dem Deckblatt gefunden" in log_text
+    assert "Ende der Verantwortlichen-Erfassung: 1 gesamt, 1 ohne Ergebnis." in log_text
+
+
+def test_verantwortliche_aus_kontaktblock_und_verantwortlichem_team(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    legacy = Document()
+    title = legacy.add_table(rows=1, cols=1)
+    title.cell(0, 0).text = "EG930_RWWS2.0_EH\nTestfall: EG930_0704001"
+    contact = legacy.add_table(rows=2, cols=2)
+    contact.cell(0, 0).text = "Angela Hoppe\nT: +49/40/6377-8986\nF: +49/40/6377-xxx\nangela.hoppe@edeka.de"
+    contact.cell(1, 0).text = "STATUS\nin Bearbeitung"
+    contact.cell(1, 1).text = "VERSION\n1.0"
+    legacy.add_table(rows=1, cols=1).cell(0, 0).text = "Verantwortlicher: Späterer Inhalt"
+    legacy_path = input_dir / "legacy.docx"
+    legacy.save(legacy_path)
+
+    team = Document()
+    team.add_paragraph("Testfall: TFB_03.02.001.01_GH")
+    team.add_table(rows=1, cols=1).cell(0, 0).text = "Verantwortliches Team: SKA"
+    team.add_table(rows=1, cols=1).cell(0, 0).text = "Verantwortlicher: Späterer Inhalt"
+    team_path = input_dir / "team.docx"
+    team.save(team_path)
+
+    assert cover_responsibles(read_docx(legacy_path)) == ["Angela Hoppe"]
+    assert cover_responsibles(read_docx(team_path)) == ["SKA"]
+    csv_path = tmp_path / "liste.csv"
+    assert main(["verantwortliche", "--input-dir", str(input_dir), "--csv-path", str(csv_path)]) == 0
+    with csv_path.open(encoding="utf-8-sig", newline="") as output:
+        assert list(csv.reader(output, delimiter=";")) == [
+            ["verantwortlicher", "datei"],
+            ["Angela Hoppe", "legacy.docx"],
+            ["SKA", "team.docx"],
+        ]
+
+
+def test_verantwortliche_nicht_aus_unbeschriftetem_statusfeld(tmp_path: Path) -> None:
+    document = Document()
+    document.add_paragraph("Testfall: TF_001")
+    document.add_table(rows=1, cols=1).cell(0, 0).text = "STATUS\nin Bearbeitung\nVERSION\nservice@example.de"
+    path = tmp_path / "status.docx"
+    document.save(path)
+
+    assert cover_responsibles(read_docx(path)) == []
 
 
 def test_bildreihenfolge_und_positionen(tmp_path: Path) -> None:
@@ -45,6 +144,7 @@ def test_parser_felder_und_schritte(tmp_path: Path) -> None:
     test_case = parse_test_case(document, _standard_profile())
 
     assert test_case.name == "TF_Beispiel_001"
+    assert test_case.responsible_names == ["Max Mustermann"]
     assert test_case.process_path == [
         "03.02 Einkaufsverwaltung",
         "03.02.001 Pflege Einkaufskonditionen",

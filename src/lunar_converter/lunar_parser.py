@@ -22,6 +22,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from .models import CheckboxRef, ImageRef, Issue, ProfileDefinition, Segment, SourceCell, SourceDocument, SourceParagraph, SourceRow, SourceTable
+from .responsibles import cover_responsibles
 from .semantic_model import (
     STEP_ACTION_KEY,
     STEP_ACTUAL_KEY,
@@ -103,6 +104,7 @@ class _TestCaseParser:
             name=name,
             steps=steps,
             labels=_cover_labels(cover.table) if cover else [],
+            responsible_names=cover_responsibles(self._document),
             process_path=cover.process_path if cover else [],
             title=cover.title if cover else "",
             info_table=info_table,

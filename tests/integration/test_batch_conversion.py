@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 from lunar_converter.cli import main
@@ -34,7 +35,8 @@ def test_erfolgreiche_verarbeitung_einer_docx(input_dir: Path, output_dir: Path,
         "|Kurzbeschreibung|Es wird ein Beispiel geprüft.|\n"
         "|Voraussetzungen|Stammdaten sind vorhanden.|"
     )
-    assert testcase["labels"] == ["RWWS"] and testcase["components"] == []
+    assert testcase["labels"] == ["RWWS", "Max Mustermann"] and testcase["components"] == []
+    assert "reporter_email" not in testcase
     assert testcase["custom_fields"] == {
         "customfield_15909": "03.02 Einkaufsverwaltung/03.02.001 Pflege Einkaufskonditionen/Prüfung der/Beispielkonditionen"
     }
@@ -51,6 +53,34 @@ def test_erfolgreiche_verarbeitung_einer_docx(input_dir: Path, output_dir: Path,
     ]
     assert (output_dir / "TFB_03.03.004_EH_012_MDE_Direktbestellung" / "screenshots").is_dir()
     assert (output_dir / "conversion.log").is_file()
+
+
+def test_responsibles_csv_fuellt_reporter_email_oder_label(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert, tmp_path: Path
+) -> None:
+    build_lunar_docx(
+        input_dir / "FiCo EH" / "Debitoren.docx",
+        DocSpec(responsible="Markus Gerich"),
+    )
+    build_lunar_docx(
+        input_dir / "SKA" / "Konditionen.docx",
+        DocSpec(responsible="SKA"),
+    )
+    mapping_csv = tmp_path / "verantwortliche-email.csv"
+    with mapping_csv.open("w", encoding="utf-8-sig", newline="") as output:
+        writer = csv.writer(output, delimiter=";")
+        writer.writerow(["verantwortlicher", "datei", "Gefunden", "Email", "Status"])
+        writer.writerow(["Markus Gerich", "FiCo EH/Debitoren.docx", "True", "markus.gerich@edeka.de", ""])
+        writer.writerow(["SKA", "SKA/Konditionen.docx", "False", "", "Name/Gruppe nicht gefunden"])
+
+    assert run_convert("--responsibles-csv", str(mapping_csv)) == 0
+
+    mapped = load_testcase(output_dir, "Debitoren")
+    assert mapped["reporter_email"] == "markus.gerich@edeka.de"
+    assert mapped["labels"] == ["RWWS"]
+    unmapped = load_testcase(output_dir, "Konditionen")
+    assert "reporter_email" not in unmapped
+    assert unmapped["labels"] == ["RWWS", "SKA"]
 
 
 def test_poc_beispiel_wird_weiterhin_verarbeitet(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:

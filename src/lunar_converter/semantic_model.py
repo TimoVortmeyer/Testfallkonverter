@@ -123,6 +123,8 @@ class TestCase:
     name: str
     steps: list[TestStep]
     labels: list[str] = field(default_factory=list)
+    responsible_names: list[str] = field(default_factory=list)
+    reporter_email: str | None = None
     # Geschäftsprozess, Geschäftsprozessszenario, optionale Unterprozesse (Deckblatt).
     process_path: list[str] = field(default_factory=list)
     # Optionale Testfallbeschreibung vom Deckblatt, einzeilig.

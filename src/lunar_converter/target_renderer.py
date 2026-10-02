@@ -93,7 +93,7 @@ class XrayImportRenderer:
 
     def render(self, test_case: TestCase, images: ImageAssignmentResult, source_name: str) -> dict[str, Any]:
         anchors = images.anchors
-        return {
+        payload = {
             "summary": self.render_summary(source_name),
             "description": self.render_description(test_case, anchors),
             "labels": self.render_labels(test_case),
@@ -102,6 +102,9 @@ class XrayImportRenderer:
             "screenshots": images.global_screenshots,
             "steps": [self.render_step(step, anchors, images.step_attachments(step.index)) for step in test_case.steps],
         }
+        if test_case.reporter_email:
+            payload["reporter_email"] = test_case.reporter_email
+        return payload
 
     def render_summary(self, source_name: str) -> str:
         return escape_jira_emoticons(source_name)

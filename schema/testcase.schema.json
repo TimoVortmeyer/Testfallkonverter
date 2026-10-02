@@ -13,6 +13,7 @@
     "labels": {"type": "array", "items": {"type": "string"}},
     "components": {"type": "array", "items": {"type": "string"}},
     "custom_fields": {"type": "object"},
+    "reporter_email": {"type": "string", "minLength": 1},
     "screenshots": {"type": "array", "items": {"$ref": "#/$defs/imageReference"}, "uniqueItems": true},
     "steps": {
       "type": "array",

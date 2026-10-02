@@ -140,6 +140,45 @@ Semikolon als Trennzeichen. Zusätzlich entsteht daneben eine Logdatei mit dem
 gleichen Format wie bei der Konvertierung, standardmäßig `<csv-name>.preflight.log`.
 Mit `--log-level DEBUG` werden auch die Einzelgründe jeder Profilprüfung protokolliert.
 
+### Verantwortliche vom Deckblatt auflisten
+
+```powershell
+python -m lunar_converter verantwortliche --input-dir .\input --csv-path .\output\verantwortliche.csv
+```
+
+Der Befehl sucht rekursiv in `.docx` und `.doc` nach beschrifteten Deckblattzeilen
+wie `Verantwortlicher: Markus Gerich`, `Verantwortlicher: Team RWWS EH1 (SP)`
+oder `Verantwortliches Team: SKA`. Ein unbeschrifteter Personenname wird im
+Kontaktblock direkt nach der Testfallzeile erkannt, wenn Telefonnummer, Fax
+oder E-Mail unmittelbar darauf folgen. Spätere Tabellen werden nicht durchsucht.
+Die CSV enthält je Fund eine Zeile mit `verantwortlicher;datei` (relativer Quellpfad),
+UTF-8 mit BOM und Semikolon als Trennzeichen. `.doc` benötigt Microsoft Word.
+Dateien ohne Fund oder mit Lesefehlern werden auf stderr und in der Logdatei
+`<csv-name>.verantwortliche.log` neben der CSV gemeldet. Die Logdatei enthält
+auch Start, Funde je Datei und Abschluss. Mit `--log-level` lässt sich das
+Log-Level wie beim Preflight einstellen. Exit-Code `1` zeigt eine unvollständige
+Liste an. Existierende CSV- und Logdateien werden nicht überschrieben.
+
+Die erzeugte CSV kann extern um die Spalte `Email` ergänzt werden. Bei der
+Konvertierung lässt sie sich optional mit `--responsibles-csv` angeben:
+
+```powershell
+python -m lunar_converter convert `
+  --input-dir .\input `
+  --output-dir .\output\lauf_mit_email `
+  --responsibles-csv .\output\verantwortliche-angereichert.csv
+```
+
+Für die Zuordnung werden `verantwortlicher`, `datei` und `Email` verwendet;
+weitere Spalten wie `Gefunden` und `Status` sind optional und werden ignoriert.
+Der relative Quellpfad in `datei` muss zur Quelldatei passen. Eine gefundene
+E-Mail wird als `reporter_email` in `testcase.json` ausgegeben. Ist keine
+E-Mail zugeordnet oder wird die Mapping-CSV weggelassen, kommt der extrahierte
+Verantwortlichenname stattdessen als zusätzliches Label in den Testfall.
+Mehrere unterschiedliche E-Mail-Adressen für einen Testfall werden nicht
+willkürlich ausgewählt: Der Konverter lässt `reporter_email` weg, übernimmt die
+Verantwortlichennamen als Labels und schreibt eine Warnung in den Report.
+
 ```powershell
 python -m lunar_converter convert `
   --input-dir .\input `
@@ -156,6 +195,7 @@ python -m lunar_converter convert `
 | `--fail-fast` | nein | Beim ersten Dateifehler abbrechen |
 | `--schema-path` | nein | JSON-Schema, Standard `schema/testcase.schema.json` |
 | `--config-dir` | nein | Konfigurationsordner mit `profiles/`, Standard `config/` |
+| `--responsibles-csv` | nein | Optionale Verantwortlichen-CSV mit E-Mail-Adressen |
 
 Beispiele:
 
@@ -332,8 +372,10 @@ h1. Berücksichtigung von rechnungswirksamen Konditionen in der Bestellaktualisi
 `custom_fields.customfield_15909` ausgegeben. Das ist die konfigurierte Xray-
 Feld-ID für den Testrepository-Pfad.
 
-Nicht mehr übernommen werden weitere Deckblattzeilen (z. B. „Verantwortlicher: …“)
-und Inhalte weiterer Tabellen vor der Schritttabelle (z. B. Status/Version).
+Weitere Deckblattzeilen und Inhalte weiterer Tabellen vor der Schritttabelle
+(z. B. Status/Version) werden nicht in die Description übernommen. Der
+Verantwortliche wird separat als Label oder `reporter_email` behandelt (siehe
+„Verantwortliche vom Deckblatt auflisten“).
 
 ## 11. Neues Profil ergänzen
 
