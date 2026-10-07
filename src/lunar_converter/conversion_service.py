@@ -208,6 +208,14 @@ class _FileConverter:
         log.info("Profil erkannt: %s (%s).", profile.id, profile.name)
 
         test_case = parse_test_case(document, profile)
+        if not test_case.name.strip() and not any(w.code == "ambiguous_testcase_name" for w in test_case.warnings):
+            test_case.name = source.stem
+            test_case.warnings.append(
+                Issue(
+                    code="testcase_name_from_filename",
+                    message=f"{source.name}: Kein Testfallname erkannt; der Dateiname '{source.stem}' wird als Testfallname verwendet.",
+                )
+            )
         self._apply_responsible_mapping(test_case, source)
         folder_name = sanitize_folder_name(source.stem)
         if folder_name.casefold() in used_folder_names:

@@ -13,27 +13,24 @@ from tests.fixtures.docx_factory import PNG, DocSpec, StepSpec, build_lunar_docx
 from tests.helpers import RunConvert, error_codes, file_entry, final_entries, load_report, load_testcase
 
 
-def test_fehlender_testfallname_wird_mit_required_field_missing_abgelehnt(
+def test_fehlender_testfallname_wird_durch_dateinamen_ersetzt(
     input_dir: Path, output_dir: Path, run_convert: RunConvert
 ) -> None:
     build_lunar_docx(input_dir / "ohne_name.docx", DocSpec(name=None))
 
-    assert run_convert() == 1
+    assert run_convert() == 0
 
     entry = file_entry(load_report(output_dir), "ohne_name.docx")
     assert entry["detected_profile"] == "lunar_standard_v1"
-    assert error_codes(entry) == ["required_field_missing"]
-    assert entry["errors"][0]["field"] == "summary"
-    assert final_entries(output_dir) == []
+    assert any(warning["code"] == "testcase_name_from_filename" for warning in entry["warnings"])
+    assert load_testcase(output_dir, "ohne_name")["summary"] == "ohne_name"
 
 
-def test_leerer_testfallname_wird_mit_required_field_missing_abgelehnt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+def test_leerer_testfallname_wird_durch_dateinamen_ersetzt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
     build_lunar_docx(input_dir / "leer.docx", DocSpec(name="   "))
 
-    assert run_convert() == 1
-    entry = file_entry(load_report(output_dir), "leer.docx")
-    assert error_codes(entry) == ["required_field_missing"]
-    assert entry["errors"][0]["field"] == "summary"
+    assert run_convert() == 0
+    assert load_testcase(output_dir, "leer")["summary"] == "leer"
 
 
 def test_mehrere_unterschiedliche_namensfelder_werden_abgelehnt(
@@ -168,10 +165,11 @@ def test_leeres_system_wird_nicht_definiert(input_dir: Path, output_dir: Path, r
     assert [step["system"] for step in testcase["steps"]] == ["SAP FI", "nicht definiert"]
 
 
-def test_alle_fehlenden_felder_werden_gemeldet(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+def test_schritt_nur_mit_erwartetem_ergebnis_und_dateiname_als_summary(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
     build_lunar_docx(input_dir / "a.docx", DocSpec(name=None, steps=[StepSpec(system="", action="", expected="Ergebnis")]))
 
-    assert run_convert() == 1
+    assert run_convert() == 0
 
-    fields = [error["field"] for error in file_entry(load_report(output_dir), "a.docx")["errors"]]
-    assert fields == ["summary"]
+    testcase = load_testcase(output_dir, "a")
+    assert testcase["summary"] == "a"
+    assert testcase["steps"][0]["expected_result"] == "Ergebnis"

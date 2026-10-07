@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from docx import Document
+
 from lunar_converter.cli import main
 from lunar_converter import responsibles
 from tests.fixtures.docx_factory import PNG, DocSpec, StepSpec, build_lunar_docx, build_poc_sample_docx
@@ -203,10 +205,7 @@ def test_fail_fast_ueberspringt_restliche_dateien(input_dir: Path, output_dir: P
 
 
 def test_bei_fehler_kein_finaler_testfallordner(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
-    build_lunar_docx(
-        input_dir / "fehlerhaft.docx",
-        DocSpec(name=None, steps=[StepSpec(action="", expected="", action_images=[])]),
-    )
+    build_lunar_docx(input_dir / "fehlerhaft.docx", DocSpec(include_kurzbeschreibung=False, include_testablauf=False))
 
     assert run_convert() == 1
 
@@ -296,7 +295,10 @@ def test_conversion_report_inhalt_und_status(input_dir: Path, output_dir: Path, 
 
 
 def test_log_enthaelt_datei_und_profil(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
-    build_lunar_docx(input_dir / "a.docx", DocSpec(name=None))
+    path = build_lunar_docx(input_dir / "a.docx")
+    document = Document(str(path))
+    document.tables[0].cell(1, 0).add_paragraph("Testfallname: Anderer Name")
+    document.save(str(path))
 
     assert run_convert() == 1
 
@@ -321,15 +323,15 @@ def test_dry_run_schreibt_keine_exportdaten(input_dir: Path, output_dir: Path, r
     assert entry["exported_image_count"] == 1
 
 
-def test_summary_wird_bei_fehlendem_dokumentnamen_abgelehnt(
+def test_summary_faellt_bei_fehlendem_dokumentnamen_auf_dateinamen_zurueck(
     input_dir: Path, output_dir: Path, run_convert: RunConvert
 ) -> None:
-    build_lunar_docx(input_dir / "a.docx", DocSpec(name=None))
+    build_lunar_docx(input_dir / "TFB_Ohne Namen.docx", DocSpec(name=None))
 
-    assert run_convert() == 1
+    assert run_convert() == 0
 
-    assert final_entries(output_dir) == []
-    assert error_codes(file_entry(load_report(output_dir), "a.docx")) == ["required_field_missing"]
+    assert load_testcase(output_dir, "TFB_Ohne_Namen")["summary"] == "TFB_Ohne Namen"
+    assert "Kein Testfallname erkannt" in (output_dir / "conversion.log").read_text(encoding="utf-8")
 
 
 def test_ordnername_konflikt_wird_erkannt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:

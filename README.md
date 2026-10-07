@@ -292,9 +292,12 @@ Testfallordner), weil der Importer `<ordner>/*/testcase.json` liest.
 Der Ordnername wird ausschließlich aus dem Dateinamen gebildet und bleibt von
 der fachlichen Summary getrennt. `summary` wird aus dem im Dokument erkannten
 Feld `Testfallname` (Profilalias `testfallname`, zum Beispiel `Testfall: <Name>`)
-übernommen. Fehlt der Name oder ist er leer, wird die Datei mit
-`required_field_missing` abgelehnt; mehrere unterschiedliche Namensfelder
-erzeugen eine Reportwarnung und ebenfalls eine leere, damit abgelehnte Summary.
+übernommen. Steht der Bezeichner allein in einer Tabellenzelle, wird der Wert der
+Nachbarzelle verwendet. Wird kein Name erkannt oder ist er leer, wird der
+Dateiname ohne Endung als `summary` verwendet (Reportwarnung
+`testcase_name_from_filename`). Mehrere unterschiedliche Namensfelder erzeugen
+die Reportwarnung `ambiguous_testcase_name`; die Datei wird dann mit
+`required_field_missing` abgelehnt.
 Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen)
 und – wie im POC – Leerraum werden durch `_` ersetzt; reservierte Windows-Namen (`CON`, `NUL`, …)
 erhalten ein `_`. Ergeben zwei Quelldateien denselben Ordnernamen (z. B.
@@ -552,7 +555,7 @@ Fehlercodes je Datei: `input_file_error`, `docx_content_error`, `doc_conversion_
 Fehler einer Datei brechen den Batch nicht ab. Mit `--fail-fast` werden die
 restlichen Dateien als `skipped` gemeldet.
 
-Pflichtregeln: `summary` (= Feld `Testfallname`) nicht leer. Testschritte sind
+Pflichtregeln: `summary` (= Feld `Testfallname`, ersatzweise Dateiname) nicht leer. Testschritte sind
 optional; ohne Testschritte wird `steps` nicht geschrieben. Eine Tabellenzeile wird nur übernommen, wenn `action` oder
 `expected_result` einschließlich zugeordneter Bilder Inhalt hat. Fehlt eine
 Seite, wird sie als `-` ausgegeben; sind beide leer, wird die Zeile ignoriert.
