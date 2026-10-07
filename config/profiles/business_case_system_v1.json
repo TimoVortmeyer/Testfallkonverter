@@ -1,18 +1,20 @@
 {
-  "id": "lunar_standard_v1",
-  "name": "Standard-Testfall mit Systemspalte (LUNAR und EDDI)",
+  "id": "business_case_system_v1",
+  "name": "Geschäftsvorfall mit Standard-Schritttabelle und Systemspalte",
   "required_markers": [
-    "Kurzbeschreibung"
+    "Testablauf",
+    "Geschäftsvorfall"
   ],
   "step_table": {
     "required_columns": [
+      "System / Komponente",
       "Beschreibung des Testschritts",
       "Erwartete Ergebnisse"
     ]
   },
   "info_table": {
     "required_labels": [
-      "Kurzbeschreibung"
+      "Geschäftsvorfall"
     ]
   },
   "field_aliases": {

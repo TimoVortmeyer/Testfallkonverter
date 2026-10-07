@@ -29,7 +29,8 @@
     ],
     "action": [
       "Geschäftsprozess-Schritte",
-      "Geschäftsprozessschritte"
+      "Geschäftsprozessschritte",
+      "Geschäftsprozess-Schritte Anwendungsfall-Schritt"
     ],
     "data": [
       "Eingabedaten / besondere Angaben",
