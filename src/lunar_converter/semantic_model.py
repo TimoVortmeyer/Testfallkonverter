@@ -30,7 +30,7 @@ STEP_COLUMN_KEYS: tuple[str, ...] = (
     STEP_ACTUAL_KEY,
 )
 # Spalten, in denen Bilder eindeutig einem Textfeld des Schritts zugeordnet werden dürfen.
-STEP_IMAGE_KEYS: tuple[str, ...] = (STEP_ACTION_KEY, STEP_EXPECTED_KEY, STEP_ACTUAL_KEY)
+STEP_IMAGE_KEYS: tuple[str, ...] = (STEP_ACTION_KEY, STEP_EXPECTED_KEY)
 # Einzige in Profilen erlaubte Alias-Schlüssel.
 PROFILE_ALIAS_KEYS: tuple[str, ...] = (TESTCASE_NAME_KEY, *STEP_COLUMN_KEYS)
 
@@ -90,7 +90,6 @@ class TestStep:
         return {
             STEP_ACTION_KEY: self.action,
             STEP_EXPECTED_KEY: self.expected_result,
-            STEP_ACTUAL_KEY: self.actual_result,
         }
 
 
@@ -131,4 +130,5 @@ class TestCase:
     title: str = ""
     info_table: InfoTable | None = None
     unassigned_images: list[UnassignedImage] = field(default_factory=list)
+    ignored_image_ids: set[int] = field(default_factory=set)
     warnings: list[Issue] = field(default_factory=list)

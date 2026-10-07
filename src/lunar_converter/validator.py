@@ -23,7 +23,8 @@ _STEP_REQUIRED_FIELDS: tuple[tuple[str, str], ...] = (
     ("action", "Beschreibung des Testschritts"),
     ("expected_result", "Erwartetes Ergebnis"),
 )
-_ANCHOR_RE = re.compile(r"!([^!\s/\\]+\.png)!")
+_SCREENSHOT_ANCHOR_RE = re.compile(r"!(?=([^!]+)!)")
+_SCREENSHOT_FILENAME_RE = re.compile(r"[^\\/:*?\"<>|!\r\n]+\.(?:png|jpe?g|gif|webp)")
 
 
 def load_schema(schema_path: Path) -> dict[str, Any]:
@@ -110,7 +111,7 @@ def validate_payload(payload: Mapping[str, Any], schema: Mapping[str, Any], scre
 
 def _check_file(name: str, screenshots_dir: Path, field: str) -> list[Issue]:
     candidate = screenshots_dir / name
-    inside = Path(name).name == name and name not in {"", ".", ".."}
+    inside = Path(name).name == name and name not in {"", ".", ".."} and bool(_SCREENSHOT_FILENAME_RE.fullmatch(name))
     if inside and candidate.is_file():
         return []
     return [
@@ -129,7 +130,8 @@ def _check_anchors(text: str, allowed: set[str], field: str) -> list[Issue]:
             field=field,
             message=f"Bildanker '!{name}!' verweist auf keine referenzierte Bilddatei dieses Feldes.",
         )
-        for name in _ANCHOR_RE.findall(text)
+        for match in _SCREENSHOT_ANCHOR_RE.finditer(text)
+        if (name := match.group(1)) and _SCREENSHOT_FILENAME_RE.fullmatch(name)
         if name not in allowed
     ]
 

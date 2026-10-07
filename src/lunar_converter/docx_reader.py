@@ -28,6 +28,8 @@ def read_docx(path: Path) -> SourceDocument:
     traversal = BodyTraversal(
         resolve_image=lambda rel_id, linked: _resolve_image(document, rel_id, linked),
         is_heading_style=_heading_style_classifier(document),
+        numbering=document.part.numbering_part.element,
+        styles=document.styles.element,
     )
     try:
         blocks = traversal.traverse(document.element.body)
@@ -41,6 +43,7 @@ def read_docx(path: Path) -> SourceDocument:
         blocks=blocks,
         images=traversal.images,
         ignored_header_footer_images=_count_header_footer_images(document),
+        warnings=traversal.warnings,
     )
 
 

@@ -23,7 +23,7 @@ from .text_normalizer import is_blank, normalize_heading
 
 # Kopfzeile wird in den ersten Zeilen gesucht, um z. B. Titelzeilen über dem Tabellenkopf zu erlauben.
 MAX_HEADER_SCAN_ROWS = 3
-CONTENT_KEYS: tuple[str, ...] = (STEP_SYSTEM_KEY, STEP_ACTION_KEY, STEP_DATA_KEY, STEP_EXPECTED_KEY, STEP_ACTUAL_KEY)
+CONTENT_KEYS: tuple[str, ...] = (STEP_ACTION_KEY, STEP_EXPECTED_KEY)
 
 RowKind = Literal["header", "empty", "layout", "data"]
 
@@ -34,6 +34,7 @@ class StepTableLayout:
     header_row_index: int
     columns: dict[str, int]
     header_texts: dict[str, str]
+    data_is_action: bool = False
 
     def data_rows(self) -> Iterator[tuple[int, SourceRow]]:
         for index, row in enumerate(self.table.rows):
@@ -78,7 +79,15 @@ def find_step_tables(document: SourceDocument, profile: ProfileDefinition) -> li
                         columns[key] = grid_column
                         header_texts[key] = name
                         break
-            layouts.append(StepTableLayout(table=table, header_row_index=row_index, columns=columns, header_texts=header_texts))
+            layouts.append(
+                StepTableLayout(
+                    table=table,
+                    header_row_index=row_index,
+                    columns=columns,
+                    header_texts=header_texts,
+                    data_is_action=profile.id == "gh_standard_v1" and STEP_DATA_KEY in columns,
+                )
+            )
             break
     return layouts
 
@@ -93,7 +102,8 @@ def classify_row(layout: StepTableLayout, row: SourceRow) -> RowKind:
         return "header"
     content_cells: list[SourceCell] = []
     spans_multiple = False
-    for key in CONTENT_KEYS:
+    content_keys = (*CONTENT_KEYS, STEP_DATA_KEY) if layout.data_is_action else CONTENT_KEYS
+    for key in content_keys:
         if key not in layout.columns:
             continue
         cell = row.cell_at(layout.columns[key])

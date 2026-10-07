@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["summary", "steps"],
   "$defs": {
-    "imageReference": {"type": "string", "pattern": "^[^/\\\\]+\\.png$"}
+    "imageReference": {"type": "string", "pattern": "^[^/\\\\:*?\"<>|!\\r\\n]+\\.(png|jpe?g|gif|webp)$"}
   },
   "properties": {
     "summary": {"type": "string", "minLength": 1},

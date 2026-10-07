@@ -16,7 +16,7 @@ import pytest
 
 from lunar_converter import doc_converter
 from lunar_converter.cli import main
-from lunar_converter.exceptions import ConfigurationError
+from lunar_converter.exceptions import ConfigurationError, OutputDirectoryError
 from tests.fixtures.docx_factory import DocSpec, build_lunar_docx
 from tests.helpers import RunConvert, error_codes, file_entry, final_entries, load_report, load_testcase
 
@@ -64,7 +64,7 @@ def test_doc_wird_mit_word_umgewandelt(
     assert command[1:4] == ["-NoProfile", "-NonInteractive", "-File"]
     assert "ExecutionPolicy" not in " ".join(command)
     assert Path(command[4]).name == "convert_doc_to_docx.ps1" and Path(command[4]).is_file()
-    assert load_testcase(output_dir, "Alt_Format_ä")["summary"] == "Alt Format ä"
+    assert load_testcase(output_dir, "Alt_Format_ä")["summary"] == "TF_aus_DOC"
     assert sorted(p.name for p in input_dir.iterdir()) == ["Alt Format ä.doc"]
 
 
@@ -149,6 +149,93 @@ def test_stapelvorbereitung_nutzt_rekursive_progress_optionen(
     assert command[-2:] == ["-Recurse", "-ShowProgress"]
     assert kwargs["capture_output"] is False
     assert output_dir.is_dir()
+
+
+@pytest.mark.parametrize(
+    ("answer", "skip_existing", "target_survives"),
+    [
+        ("Löschen", False, False),
+        ("Nicht Löschen", True, True),
+    ],
+)
+def test_stapelvorbereitung_behandelt_bestehenden_output_ordner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: str,
+    skip_existing: bool,
+    target_survives: bool,
+) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.doc").write_bytes(b"doc")
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+    existing_target = output_dir / "a.docx"
+    existing_target.write_bytes(b"existing DOCX")
+    monkeypatch.setattr(doc_converter.shutil, "which", lambda name: r"C:\PS\pwsh.exe" if name == "pwsh" else None)
+    monkeypatch.setattr("builtins.input", lambda _: answer)
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert ("-SkipExisting" in command) is skip_existing
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(doc_converter.subprocess, "run", fake_run)
+
+    total, result = doc_converter.prepare_docx_directory(input_dir, output_dir)
+
+    assert (total, result) == (1, 0)
+    assert len(calls) == 1
+    assert existing_target.exists() is target_survives
+
+
+def test_stapelvorbereitung_bestehender_output_ordner_kann_abgebrochen_werden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.doc").write_bytes(b"doc")
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+    existing_target = output_dir / "a.docx"
+    existing_target.write_bytes(b"existing DOCX")
+    monkeypatch.setattr("builtins.input", lambda _: "Abbrechen")
+    monkeypatch.setattr(doc_converter, "find_powershell", lambda: Path(r"C:\PS\pwsh.exe"))
+    monkeypatch.setattr(doc_converter.subprocess, "run", lambda *args, **kwargs: pytest.fail("PowerShell darf nicht gestartet werden"))
+
+    with pytest.raises(OutputDirectoryError, match="abgebrochen"):
+        doc_converter.prepare_docx_directory(input_dir, output_dir)
+
+    assert existing_target.read_bytes() == b"existing DOCX"
+
+
+def test_powershell_skip_existing_laesst_zieldocx_unveraendert(tmp_path: Path) -> None:
+    if doc_converter.shutil.which("pwsh") is None and doc_converter.shutil.which("powershell") is None:
+        pytest.skip("PowerShell nicht verfügbar")
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.doc").write_bytes(b"source DOC; Word must not open this")
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+    existing_target = output_dir / "a.docx"
+    existing_target.write_bytes(b"keep this existing DOCX")
+    script = Path(__file__).resolve().parents[2] / "src" / "lunar_converter" / "resources" / doc_converter.WORD_SCRIPT_NAME
+    command = doc_converter.build_conversion_command(
+        doc_converter.find_powershell(),
+        script,
+        input_dir,
+        output_dir,
+        recursive=True,
+        skip_existing=True,
+    )
+
+    completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)
+
+    assert completed.returncode == 0, completed.stderr
+    assert existing_target.read_bytes() == b"keep this existing DOCX"
+    assert "uebersprungen" in completed.stdout
+    assert "fehlgeschlagen" in completed.stdout and "0 fehlgeschlagen" in completed.stdout
 
 
 def test_stapelvorbereitung_schuetzt_ueberlappende_ordner(tmp_path: Path) -> None:

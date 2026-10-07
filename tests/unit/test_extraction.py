@@ -14,8 +14,9 @@ from lunar_converter.lunar_parser import parse_test_case
 from lunar_converter.models import ProfileDefinition, SourceTable
 from lunar_converter.profile_loader import load_profiles
 from lunar_converter.responsibles import cover_responsibles
+from lunar_converter.image_assignment import assign_images
 from lunar_converter.semantic_model import ImageMarker
-from lunar_converter.target_renderer import render_wiki_table
+from lunar_converter.target_renderer import XrayImportRenderer, render_wiki_table
 from tests.fixtures.docx_factory import PNG, DocSpec, StepSpec, build_lunar_docx
 from tests.helpers import CONFIG_DIR
 
@@ -148,8 +149,6 @@ def test_parser_felder_und_schritte(tmp_path: Path) -> None:
     assert test_case.process_path == [
         "03.02 Einkaufsverwaltung",
         "03.02.001 Pflege Einkaufskonditionen",
-        "Prüfung der",
-        "Beispielkonditionen",
     ]
     assert test_case.title == "Prüfung der Beispielkonditionen"
     assert test_case.info_table is not None
@@ -160,9 +159,30 @@ def test_parser_felder_und_schritte(tmp_path: Path) -> None:
     ]
     assert [step.step_number for step in test_case.steps] == ["10", "20"]
     assert test_case.steps[0].action.plain_text() == "Zeile 1\nZeile 2"
-    assert test_case.steps[0].actual_result.plain_text() == "Tatsächlich"
+    assert test_case.steps[0].actual_result.is_empty()
     assert test_case.steps[1].system == "BW"
     assert test_case.unassigned_images == []
+
+
+def test_deckblatt_beschreibung_zwischen_prozessebenen_bleibt_ausserhalb_des_pfad(tmp_path: Path) -> None:
+    path = build_lunar_docx(
+        tmp_path / "beschreibung_zwischen_prozessen.docx",
+        DocSpec(
+            process_lines=("03.02 Einkauf", "03.02.001 Konditionen"),
+            title_lines=("Fachliche Beschreibung",),
+        ),
+    )
+    document = Document(str(path))
+    title_cell = document.tables[0].cell(1, 0)
+    insertion = title_cell.add_paragraph("Zwischenbeschreibung")
+    title_cell.paragraphs[1]._p.addprevious(insertion._p)
+    document.save(str(path))
+
+    test_case = parse_test_case(read_docx(path), _standard_profile())
+
+    assert test_case.process_path == ["03.02 Einkauf", "03.02.001 Konditionen"]
+    assert "Zwischenbeschreibung" in test_case.title
+    assert "Fachliche Beschreibung" in test_case.title
 
 
 def test_parser_merkt_bild_in_action(tmp_path: Path) -> None:
@@ -217,3 +237,39 @@ def test_info_tabelle_schuetzt_emoticons_und_rendert_checkboxen(tmp_path: Path) 
     rendered = render_wiki_table(test_case.info_table, {})
     assert r"Betriebsgruppe\(n)" in rendered
     assert "(/) (x)(/) System(x) System(x) System (x) (/)" in rendered
+
+
+def test_wingdings_word_listen_einrueckung_und_warnung(tmp_path: Path) -> None:
+    path = build_lunar_docx(tmp_path / "formatierung.docx", DocSpec(steps=[StepSpec(action="Normaler Text bleibt.")]))
+    document = Document(str(path))
+    info_table = next(table for table in document.tables if any(cell.text == "Kurzbeschreibung" for row in table.rows for cell in row.cells))
+    info_paragraph = info_table.cell(1, 1).paragraphs[0]
+    info_paragraph.add_run(" ")
+    info_paragraph.add_run("\uf0e0").font.name = "Wingdings"
+
+    step_table = next(table for table in document.tables if any(cell.text == "Beschreibung des Testschritts" for cell in table.rows[0].cells))
+    action_cell = step_table.cell(1, 2)
+    action_cell.add_paragraph("Erfassen Sie:")
+    action_cell.add_paragraph("Wertartikel", style="List Bullet")
+    action_cell.add_paragraph("Buchungskreis", style="List Bullet 2")
+    action_cell.add_paragraph("\t\tBetrieb")
+    arrow = action_cell.add_paragraph().add_run("\uf0d8")
+    arrow.font.name = "Wingdings"
+    unknown = action_cell.add_paragraph().add_run("\uf0b0")
+    unknown.font.name = "Wingdings"
+    document.save(str(path))
+
+    source = read_docx(path)
+    test_case = parse_test_case(source, _standard_profile())
+    payload = XrayImportRenderer().render(test_case, assign_images(test_case, {}), path.stem)
+
+    assert "→" in payload["description"]
+    action = payload["steps"][0]["action"]
+    assert "Normaler Text bleibt." in action
+    assert "• Wertartikel" in action
+    assert "↳ • Buchungskreis" in action
+    assert "↳ ↳ Betrieb" in action
+    assert "→" in action
+    assert "[Wingdings U+F0B0]" in action
+    warning = next(issue for issue in source.warnings if issue.code == "unsupported_wingdings_glyph")
+    assert warning.message.startswith("Tabelle ") and "U+F0B0" in warning.message

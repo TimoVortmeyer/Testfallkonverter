@@ -182,6 +182,15 @@ class _FileConverter:
             log.info("DOC-Datei wurde mit Microsoft Word nach DOCX umgewandelt.")
         document = read_docx(docx_path)
         report.ignored_header_footer_image_count = document.ignored_header_footer_images
+        for warning in document.warnings:
+            located_warning = Issue(
+                code=warning.code,
+                message=f"{source.name}: {warning.message}",
+                field=warning.field,
+                details=warning.details,
+            )
+            report.warnings.append(located_warning)
+            log.warning("%s", located_warning.message)
         if document.ignored_header_footer_images:
             log.info(
                 "%d Bild(er) in Kopf-/Fußzeilen werden nicht extrahiert und nicht verankert.",
@@ -210,7 +219,8 @@ class _FileConverter:
 
         package_dir = work_dir / "paket" / folder_name
         screenshots_dir = package_dir / SCREENSHOTS_DIR_NAME
-        exported = export_images(document.images, screenshots_dir)
+        exportable_images = [image for image in document.images if image.image_id not in test_case.ignored_image_ids]
+        exported = export_images(exportable_images, screenshots_dir)
         assignment = assign_images(test_case, exported.exported)
         for warning in (*test_case.warnings, *exported.warnings, *assignment.warnings):
             report.warnings.append(warning)

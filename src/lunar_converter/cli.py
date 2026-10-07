@@ -42,7 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Konvertiert .doc-Dateien gesammelt mit Microsoft Word, kopiert vorhandene .docx-Dateien "
             "und entfernt erkannte VBA-Makros aus den Zielkopien. Die Unterordnerstruktur bleibt erhalten. "
             "Dieser Schritt ist als einmalige Vorbereitung vor Preflight, Verantwortlichen-Erfassung und "
-            "Konvertierung gedacht."
+            "Konvertierung gedacht. Bei einem nicht leeren Zielordner kann dieser gelöscht, beibehalten "
+            "(vorhandene DOCX werden übersprungen) oder der Lauf abgebrochen werden."
         ),
     )
     prepare.add_argument("--input-dir", required=True, type=Path, help="Wurzelordner mit .doc/.docx-Dateien.")

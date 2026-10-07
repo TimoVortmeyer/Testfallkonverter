@@ -77,6 +77,7 @@ class _TestCaseParser:
         self._layouts = layouts
         self._name_aliases = {normalize_heading(alias) for alias in profile.aliases_for(TESTCASE_NAME_KEY)} - {""}
         self._image_reasons: dict[int, str] = {}
+        self._ignored_image_ids: set[int] = set()
         self._warnings: list[Issue] = []
 
     def parse(self) -> TestCase:
@@ -89,6 +90,7 @@ class _TestCaseParser:
         for step in steps:
             for rich in step.rich_fields().values():
                 assigned.update(rich.image_ids())
+        assigned.update(self._ignored_image_ids)
         unassigned = [
             UnassignedImage(
                 image_id=image.image_id,
@@ -109,6 +111,7 @@ class _TestCaseParser:
             title=cover.title if cover else "",
             info_table=info_table,
             unassigned_images=unassigned,
+            ignored_image_ids=set(self._ignored_image_ids),
             warnings=self._warnings,
         )
 
@@ -134,14 +137,26 @@ class _TestCaseParser:
             yield container, None
 
     def _find_cover(self) -> _Cover | None:
+        cover: _Cover | None = None
+        names: list[str] = []
         for paragraphs, table in self._containers():
             for index in range(len(paragraphs)):
                 name_lines = self._name_value(paragraphs, index)
                 if name_lines is None:
                     continue
-                process_path, title = _cover_header(paragraphs[:index])
-                return _Cover(name_lines=name_lines, process_path=process_path, title=title, table=table)
-        return None
+                names.append(self._plain_text(name_lines, reason=_NAME_IMAGE_REASON, single_line=True))
+                if cover is None:
+                    process_path, title = _cover_header(paragraphs[:index])
+                    cover = _Cover(name_lines=name_lines, process_path=process_path, title=title, table=table)
+        if cover is not None and len(set(names)) > 1:
+            self._warnings.append(
+                Issue(
+                    code="ambiguous_testcase_name",
+                    message="Mehrere unterschiedliche Testfallnamen wurden erkannt; die Summary bleibt leer.",
+                )
+            )
+            cover.name_lines = []
+        return cover
 
     def _name_value(self, paragraphs: list[SourceParagraph], index: int) -> Lines | None:
         """Liefert den Testfallnamen aus ``Testfall: <Name>`` bzw. aus dem Absatz nach einem reinen Bezeichner."""
@@ -157,6 +172,8 @@ class _TestCaseParser:
         for position, segment in enumerate(paragraph.segments):
             if isinstance(segment, ImageRef):
                 return None
+            if not isinstance(segment, str):
+                continue
             match = _LABEL_SEPARATOR_RE.search(segment)
             if match is None:
                 prefix += segment
@@ -221,6 +238,7 @@ class _TestCaseParser:
             for row_index, row in layout.data_rows():
                 location = f"Tabelle {layout.table.table_index}, Zeile {row_index + 1}"
                 kind = classify_row(layout, row)
+                self._ignore_actual_result_images(layout, row)
                 if kind == "layout":
                     self._warnings.append(
                         Issue(
@@ -236,6 +254,14 @@ class _TestCaseParser:
                             merge_origins[grid_column] = cell
         return steps
 
+    def _ignore_actual_result_images(self, layout: StepTableLayout, row: SourceRow) -> None:
+        grid_column = layout.columns.get(STEP_ACTUAL_KEY)
+        if grid_column is None:
+            return
+        cell = row.cell_at(grid_column)
+        if cell is not None and cell.vmerge != "continue":
+            self._ignored_image_ids.update(image.image_id for image in cell.images)
+
     def _build_step(
         self,
         layout: StepTableLayout,
@@ -245,6 +271,8 @@ class _TestCaseParser:
         merge_origins: dict[int, SourceCell],
     ) -> TestStep:
         step = TestStep(index=index, source_location=location)
+        action_lines: Lines = []
+        data_lines: Lines = []
         for key, grid_column in layout.columns.items():
             cell = row.cell_at(grid_column)
             if cell is None:
@@ -260,13 +288,28 @@ class _TestCaseParser:
             elif key == STEP_SYSTEM_KEY:
                 step.system = self._plain_text(lines, reason=_DEFAULT_UNASSIGNED_REASON, single_line=False)
             elif key == STEP_DATA_KEY:
-                step.data = self._plain_text(lines, reason=_DEFAULT_UNASSIGNED_REASON, single_line=False)
+                if layout.data_is_action:
+                    data_lines = lines
+                else:
+                    step.data = self._plain_text(lines, reason=_DEFAULT_UNASSIGNED_REASON, single_line=False)
             elif key == STEP_ACTION_KEY:
-                step.action = self._rich_text(lines)
+                action_lines = lines
             elif key == STEP_EXPECTED_KEY:
                 step.expected_result = self._rich_text(lines)
             elif key == STEP_ACTUAL_KEY:
-                step.actual_result = self._rich_text(lines)
+                self._ignored_image_ids.update(
+                    segment.image_id
+                    for line in lines
+                    for segment in line
+                    if isinstance(segment, ImageRef)
+                )
+        step.action = self._rich_text(action_lines)
+        if layout.data_is_action:
+            data = self._rich_text(data_lines)
+            if not step.action.is_empty() and not data.is_empty():
+                step.action.lines.extend(data.lines)
+            elif not data.is_empty():
+                step.action = data
         return step
 
     # --- Hilfsfunktionen ---------------------------------------------------------------
@@ -310,9 +353,8 @@ def _cover_header(paragraphs: list[SourceParagraph]) -> tuple[list[str], str]:
     if not process_indices:
         return [], ""
     process_path = [texts[index] for index in process_indices]
-    trailing_levels = [text for text in texts[process_indices[-1] + 1 :] if text]
-    process_path.extend(trailing_levels)
-    title = " ".join(trailing_levels)
+    description_lines = [text for text in texts if text and not _PROCESS_LINE_RE.match(text)]
+    title = " ".join(description_lines)
     return process_path, title
 
 

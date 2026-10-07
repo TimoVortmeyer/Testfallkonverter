@@ -25,7 +25,7 @@ def test_aeltere_vorlage_wird_erkannt_und_exportiert(input_dir: Path, output_dir
     assert [check["profile"] for check in entry["checked_profiles"] if check["matched"]] == ["lunar_legacy_v1"]
 
     testcase = load_testcase(output_dir, "alt")
-    assert testcase["summary"] == "alt"
+    assert testcase["summary"] == "EG930_Beispiel"
     assert testcase["labels"] == ["FICO-EH"]
     assert testcase["description"] == (
         "h1. Initiale Übernahme der Sachkonten\n\n"
@@ -33,7 +33,7 @@ def test_aeltere_vorlage_wird_erkannt_und_exportiert(input_dir: Path, output_dir
         "|Erwartete Ergebnisse|Alle Konten wurden übernommen.| | |"
     )
     assert testcase["custom_fields"] == {
-        "customfield_15909": "07.04 Sachkontenpflege/07.04.001 Sachkontenstammdatenpflege/Initiale Übernahme der Sachkonten"
+        "customfield_15909": "07.04 Sachkontenpflege/07.04.001 Sachkontenstammdatenpflege"
     }
     first, second = testcase["steps"]
     assert first == {

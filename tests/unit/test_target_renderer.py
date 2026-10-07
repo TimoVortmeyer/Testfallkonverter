@@ -42,19 +42,25 @@ def test_render_rich_text_setzt_anker_mit_leerzeichen() -> None:
     assert render_rich_text(rich, {}) == "über."
 
 
+def test_normale_ausrufezeichen_bleiben_im_fachtext_erhalten() -> None:
+    text = "Erfolgreich!\n\nAchtung!!\n\nBitte notieren!!"
+
+    assert render_rich_text(RichText.from_text(text), {}) == text
+
+
 def test_renderer_komplett() -> None:
     exported = {1: "0001.png", 2: "0002.png", 3: "0003.png", 4: "0004.png"}
     assignment = assign_images(_test_case(), exported)
     payload = XrayImportRenderer().render(_test_case(), assignment, "a")
 
-    assert payload["summary"] == "a"
+    assert payload["summary"] == "TF_1"
     assert payload["description"] == "h1. Prüfung Konditionen\n\n|Kurzbeschreibung|Text \\\\ !0001.png!|\n|Voraussetzungen| |"
     assert payload["custom_fields"] == {"customfield_15909": "03.02 Einkauf/03.02.001 Konditionen/03.02.001.01 GH"}
     assert payload["screenshots"] == ["0001.png", "0004.png"]
     step = payload["steps"][0]
     assert step["action"] == "Klick auf !0002.png! Knopf"
-    assert step["expected_result"] == "OK\n\nh3. Tatsächliches Ergebnis\nWie erwartet\n!0003.png!"
-    assert step["attachments"] == ["0002.png", "0003.png"]
+    assert step["expected_result"] == "OK"
+    assert step["attachments"] == ["0002.png"]
     assert step["data"] == "" and step["tester"] == "" and step["screenshots"] == []
     assert [w.code for w in assignment.warnings] == ["image_assignment_unclear"]
 

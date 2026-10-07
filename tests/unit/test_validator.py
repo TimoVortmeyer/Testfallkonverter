@@ -55,7 +55,7 @@ def test_gueltiges_payload_besteht_schema() -> None:
         (lambda p: p["steps"][0].pop("expected_result"), "steps[0]"),
         (lambda p: p["steps"][0].update(system=""), "steps[0].system"),
         (lambda p: p.update(screenshots=["../boese.png"]), "screenshots[0]"),
-        (lambda p: p["steps"][0].update(attachments=["bild.gif"]), "steps[0].attachments[0]"),
+        (lambda p: p["steps"][0].update(attachments=["bild.txt"]), "steps[0].attachments[0]"),
     ],
 )
 def test_schemaverletzungen_werden_erkannt(mutate: Any, expected_field: str) -> None:
@@ -82,6 +82,14 @@ def test_anker_ohne_referenz_wird_erkannt(screenshots: Path) -> None:
     payload["steps"][0]["attachments"] = []
     issues = check_image_references(payload, screenshots)
     assert [issue.field for issue in issues] == ["steps[0].action"]
+
+
+def test_normale_ausrufezeichen_sind_keine_anker(screenshots: Path) -> None:
+    payload = _payload()
+    payload["description"] = "Erfolgreich!\n\nAchtung!!\n\n!0001.png!"
+    payload["steps"][0]["action"] = "M-Beleg wird erzeugt!!\n\nBitte notieren!! !0002.png!"
+
+    assert check_image_references(payload, screenshots) == []
 
 
 def test_pflichtfelder_vor_schema(screenshots: Path) -> None:

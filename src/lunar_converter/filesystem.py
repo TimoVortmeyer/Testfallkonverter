@@ -9,6 +9,7 @@ import stat
 import sys
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from .exceptions import ExportError, OutputDirectoryError
 
@@ -34,7 +35,12 @@ def sanitize_folder_name(stem: str) -> str:
     return safe
 
 
-def prepare_output_directory(output_dir: Path, protected_dir: Path | None = None) -> None:
+def prepare_output_directory(
+    output_dir: Path,
+    protected_dir: Path | None = None,
+    *,
+    existing_policy: Literal["prompt", "clear", "preserve"] = "prompt",
+) -> None:
     """Output vorbereiten; bestehende Inhalte nur nach ausdrücklicher Bestätigung löschen."""
     if protected_dir is not None:
         resolved_output = output_dir.resolve()
@@ -49,6 +55,18 @@ def prepare_output_directory(output_dir: Path, protected_dir: Path | None = None
             raise OutputDirectoryError(f"Output-Pfad '{output_dir}' existiert, ist aber kein Ordner.")
         entries = sorted(entry.name for entry in output_dir.iterdir())
         if entries:
+            if existing_policy == "preserve":
+                return
+            if existing_policy == "clear":
+                try:
+                    shutil.rmtree(output_dir, onerror=_remove_readonly)
+                    output_dir.mkdir(parents=True)
+                except OSError as exc:
+                    raise OutputDirectoryError(
+                        f"Output-Ordner '{output_dir}' konnte nicht vollständig gelöscht und neu angelegt werden.",
+                        details=str(exc),
+                    ) from exc
+                return
             shown = ", ".join(entries[:5]) + (" …" if len(entries) > 5 else "")
             print(
                 f"WARNUNG: Output-Ordner '{output_dir}' ist nicht leer "

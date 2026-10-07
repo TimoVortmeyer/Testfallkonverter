@@ -17,7 +17,6 @@ from .image_assignment import ImageAssignmentResult
 from .semantic_model import CheckboxMarker, InfoTable, RichText, TestCase, TestStep
 from .text_normalizer import clean_multiline
 
-ACTUAL_RESULT_HEADING = "h3. Tatsächliches Ergebnis"
 EMPTY_EXPECTED_RESULT = "-"
 UNDEFINED_SYSTEM = "nicht definiert"
 PROCESS_PATH_FIELD = "customfield_15909"
@@ -94,7 +93,7 @@ class XrayImportRenderer:
     def render(self, test_case: TestCase, images: ImageAssignmentResult, source_name: str) -> dict[str, Any]:
         anchors = images.anchors
         payload = {
-            "summary": self.render_summary(source_name),
+            "summary": self.render_summary(test_case.name),
             "description": self.render_description(test_case, anchors),
             "labels": self.render_labels(test_case),
             "components": self.render_components(test_case),
@@ -106,8 +105,8 @@ class XrayImportRenderer:
             payload["reporter_email"] = test_case.reporter_email
         return payload
 
-    def render_summary(self, source_name: str) -> str:
-        return escape_jira_emoticons(source_name)
+    def render_summary(self, testcase_name: str) -> str:
+        return escape_jira_emoticons(clean_multiline(testcase_name))
 
     def render_description(self, test_case: TestCase, anchors: Mapping[int, str]) -> str:
         sections: list[str] = []
@@ -119,6 +118,7 @@ class XrayImportRenderer:
 
     def render_step(self, step: TestStep, anchors: Mapping[int, str], attachments: list[str]) -> dict[str, Any]:
         action = render_rich_text(step.action, anchors)
+        action = action or EMPTY_EXPECTED_RESULT
         data = clean_multiline(step.data)
         if data:
             data = escape_jira_emoticons(data)
@@ -138,12 +138,7 @@ class XrayImportRenderer:
         return escape_jira_emoticons(clean_multiline(step.system)) or UNDEFINED_SYSTEM
 
     def render_expected_result(self, step: TestStep, anchors: Mapping[int, str]) -> str:
-        # Übergangslösung: tatsächliches Ergebnis als eigener Block am erwarteten Ergebnis.
-        expected = render_rich_text(step.expected_result, anchors) or EMPTY_EXPECTED_RESULT
-        actual = render_rich_text(step.actual_result, anchors)
-        if actual:
-            return f"{expected}\n\n{ACTUAL_RESULT_HEADING}\n{actual}"
-        return expected
+        return render_rich_text(step.expected_result, anchors) or EMPTY_EXPECTED_RESULT
 
     def render_labels(self, test_case: TestCase) -> list[str]:
         labels: list[str] = []

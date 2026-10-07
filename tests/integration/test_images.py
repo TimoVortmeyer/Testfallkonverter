@@ -52,6 +52,30 @@ def test_bild_in_expected_result_zelle(input_dir: Path, output_dir: Path, run_co
         assert image.format == "PNG"
 
 
+def test_action_und_expected_result_bilder_allein_erzeugen_schritt(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
+    build_lunar_docx(
+        input_dir / "bilder_allein.docx",
+        DocSpec(
+            steps=[
+                StepSpec(action="", expected="", action_images=[PNG]),
+                StepSpec(number="20", action="", expected="", expected_images=[JPEG]),
+            ]
+        ),
+    )
+
+    assert run_convert() == 0
+
+    testcase = load_testcase(output_dir, "bilder_allein")
+    assert len(testcase["steps"]) == 2
+    assert testcase["steps"][0]["action"] == "!0001.png!"
+    assert testcase["steps"][0]["expected_result"] == "-"
+    assert testcase["steps"][1]["action"] == "-"
+    assert testcase["steps"][1]["expected_result"] == "!0002.png!"
+    assert [step["attachments"] for step in testcase["steps"]] == [["0001.png"], ["0002.png"]]
+
+
 def test_inline_bild_im_fliesstext(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
     build_lunar_docx(input_dir / "a.docx", DocSpec(inline_vml_image_in_action=PNG))
 

@@ -148,6 +148,7 @@ class SourceDocument:
     images: list[ImageRef]
     # Nur zur Protokollierung: Bilder aus Kopf-/Fußzeilen werden nie extrahiert.
     ignored_header_footer_images: int = 0
+    warnings: list[Issue] = field(default_factory=list)
 
     @property
     def tables(self) -> list[SourceTable]:

@@ -17,7 +17,7 @@
     -ShowProgress zeigt Dateistatus sowie Laufzeit-, Gesamtzeit- und Restzeitschaetzung.
 
     Sicherheit und Robustheit:
-    - Es wird nichts ueberschrieben; existiert die Zieldatei, schlaegt nur diese Datei fehl.
+    - Es wird nichts ueberschrieben; mit -SkipExisting werden vorhandene Zieldateien uebersprungen.
     - Makros werden beim Oeffnen deaktiviert.
     - Kennwortgeschuetzte Dokumente schlagen fehl, statt einen Dialog zu oeffnen.
     - Die Quelldateien werden nicht veraendert.
@@ -38,6 +38,9 @@
 .PARAMETER ShowProgress
     Zeigt einen Fortschrittsbalken mit Dateistatus und Zeitschaetzung.
 
+.PARAMETER SkipExisting
+    Ueberspringt vorhandene DOCX-Zieldateien, ohne sie zu pruefen oder zu ueberschreiben.
+
 .EXAMPLE
     .\src\lunar_converter\resources\convert_doc_to_docx.ps1 -InputDir C:\temp\input -OutputDir C:\temp\input_docx
 #>
@@ -46,7 +49,8 @@ param(
     [Parameter(Mandatory = $true)][string]$InputDir,
     [Parameter(Mandatory = $true)][string]$OutputDir,
     [switch]$Recurse,
-    [switch]$ShowProgress
+    [switch]$ShowProgress,
+    [switch]$SkipExisting
 )
 
 Set-StrictMode -Version Latest
@@ -155,6 +159,7 @@ Write-Info ("Start: {0} Datei(en) in '{1}', davon {2} .doc." -f $files.Count, $i
 $converted = 0
 $copied = 0
 $macrosRemoved = 0
+$skipped = 0
 $failed = 0
 $script:word = $null
 $preparationWatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -193,8 +198,22 @@ try {
         if (-not (Test-Path -LiteralPath $targetDirectory -PathType Container)) {
             New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
         }
-        if (Test-Path -LiteralPath $target) {
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            if ($SkipExisting) {
+                Write-Info "$($file.Name): vorhandene DOCX-Zieldatei wird uebersprungen."
+                $skipped++
+                $position++
+                Update-PreparationProgress $position $entry.RelativePath 'uebersprungen'
+                continue
+            }
             Write-Fehler "$($file.Name): Zieldatei '$target' existiert bereits; es wird nichts ueberschrieben."
+            $failed++
+            $position++
+            Update-PreparationProgress $position $entry.RelativePath 'Fehler'
+            continue
+        }
+        if (Test-Path -LiteralPath $target) {
+            Write-Fehler "$($file.Name): Zielpfad '$target' existiert, ist aber keine Datei."
             $failed++
             $position++
             Update-PreparationProgress $position $entry.RelativePath 'Fehler'
@@ -259,6 +278,6 @@ finally {
     }
 }
 
-Write-Info ("Ende: {0} umgewandelt, {1} kopiert, {2} Dateien von VBA-Makros bereinigt, {3} fehlgeschlagen. Ausgabe: '{4}'" -f $converted, $copied, $macrosRemoved, $failed, $outputPath)
+Write-Info ("Ende: {0} umgewandelt, {1} kopiert, {2} Dateien von VBA-Makros bereinigt, {3} uebersprungen, {4} fehlgeschlagen. Ausgabe: '{5}'" -f $converted, $copied, $macrosRemoved, $skipped, $failed, $outputPath)
 if ($failed -gt 0) { exit 1 }
 exit 0

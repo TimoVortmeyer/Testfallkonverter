@@ -34,7 +34,7 @@ def test_erfolgreiche_verarbeitung_einer_docx(
     assert "Gesamt ~" in terminal and "Rest ~" in terminal
 
     testcase = load_testcase(output_dir, "TFB_03.03.004_EH_012_MDE_Direktbestellung")
-    assert testcase["summary"] == "TFB_03.03.004_EH_012_MDE_Direktbestellung"
+    assert testcase["summary"] == "TF_Beispiel_001"
     assert testcase["description"] == (
         "h1. Prüfung der Beispielkonditionen\n\n"
         "|Fachbereich|Finanzen|\n"
@@ -44,14 +44,14 @@ def test_erfolgreiche_verarbeitung_einer_docx(
     assert testcase["labels"] == ["RWWS", "Max_Mustermann"] and testcase["components"] == []
     assert "reporter_email" not in testcase
     assert testcase["custom_fields"] == {
-        "customfield_15909": "03.02 Einkaufsverwaltung/03.02.001 Pflege Einkaufskonditionen/Prüfung der/Beispielkonditionen"
+        "customfield_15909": "03.02 Einkaufsverwaltung/03.02.001 Pflege Einkaufskonditionen"
     }
     assert testcase["steps"] == [
         {
             "system": "SAP FI",
             "action": "Transaktion aufrufen.",
             "data": "",
-            "expected_result": "Maske wird angezeigt.\n\nh3. Tatsächliches Ergebnis\nWie erwartet.",
+            "expected_result": "Maske wird angezeigt.",
             "tester": "",
             "attachments": [],
             "screenshots": [],
@@ -131,7 +131,7 @@ def test_poc_beispiel_wird_weiterhin_verarbeitet(input_dir: Path, output_dir: Pa
     assert run_convert() == 0
 
     testcase = load_testcase(output_dir, "sample")
-    assert testcase["summary"] == "sample"
+    assert testcase["summary"] == "Beispiel Testfall"
     assert testcase["labels"] == []
     # Ohne Deckblatt-Prozesszeilen und ohne Tabelle vor dem Testablauf bleibt die Description leer.
     assert testcase["description"] == ""
@@ -205,7 +205,7 @@ def test_fail_fast_ueberspringt_restliche_dateien(input_dir: Path, output_dir: P
 def test_bei_fehler_kein_finaler_testfallordner(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
     build_lunar_docx(
         input_dir / "fehlerhaft.docx",
-        DocSpec(steps=[StepSpec(action="", action_images=[], expected_images=[PNG])]),
+        DocSpec(name=None, steps=[StepSpec(action="", expected="", action_images=[])]),
     )
 
     assert run_convert() == 1
@@ -228,7 +228,7 @@ def test_unterordner_werden_verarbeitet_output_bleibt_flach(input_dir: Path, out
         "Bereich B/Tief/Fall_2.docx",
     ]
     assert final_entries(output_dir) == ["Fall_1", "Fall_2"]
-    assert load_testcase(output_dir, "Fall_1")["summary"] == "Fall_1"
+    assert load_testcase(output_dir, "Fall_1")["summary"] == "TF_A1"
     conflict = report["files"][1]
     assert error_codes(conflict) == ["output_name_conflict"]
     assert "Bereich A/Fall_1.docx" in conflict["errors"][0]["message"]
@@ -260,7 +260,10 @@ def test_dateiauswahl_sortierung_und_temporaere_dateien(input_dir: Path, output_
 
 def test_conversion_report_inhalt_und_status(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
     build_lunar_docx(input_dir / "a_ok.docx", DocSpec(steps=[StepSpec(action_images=[PNG]), StepSpec(number="20")]))
-    build_lunar_docx(input_dir / "b_ohne_profil.docx", DocSpec(include_testablauf=False))
+    build_lunar_docx(
+        input_dir / "b_ohne_profil.docx",
+        DocSpec(include_kurzbeschreibung=False, include_testablauf=False),
+    )
 
     assert run_convert() == 1
 
@@ -288,19 +291,19 @@ def test_conversion_report_inhalt_und_status(input_dir: Path, output_dir: Path, 
     assert failed["detected_profile"] is None
     assert failed["output_directory"] is None
     assert all(check["matched"] is False for check in failed["checked_profiles"])
-    assert all(any("Testablauf" in reason for reason in check["reasons"]) for check in failed["checked_profiles"])
+    assert all(any("Marker fehlen" in reason for reason in check["reasons"]) for check in failed["checked_profiles"])
     assert error_codes(failed) == ["no_matching_profile"]
 
 
 def test_log_enthaelt_datei_und_profil(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
-    build_lunar_docx(input_dir / "a.docx", DocSpec(steps=[StepSpec(action="")]))
+    build_lunar_docx(input_dir / "a.docx", DocSpec(name=None))
 
     assert run_convert() == 1
 
     log = (output_dir / "conversion.log").read_text(encoding="utf-8")
     assert "[Datei: a.docx] [Profil: lunar_standard_v1]" in log
     assert "Fehler: required_field_missing" in log
-    assert "Feld: steps[0].action" in log
+    assert "Feld: summary" in log
 
 
 def test_dry_run_schreibt_keine_exportdaten(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
@@ -318,15 +321,15 @@ def test_dry_run_schreibt_keine_exportdaten(input_dir: Path, output_dir: Path, r
     assert entry["exported_image_count"] == 1
 
 
-def test_summary_wird_auch_ohne_dokumentnamen_aus_dateiname_gebildet(
+def test_summary_wird_bei_fehlendem_dokumentnamen_abgelehnt(
     input_dir: Path, output_dir: Path, run_convert: RunConvert
 ) -> None:
     build_lunar_docx(input_dir / "a.docx", DocSpec(name=None))
 
-    assert run_convert() == 0
+    assert run_convert() == 1
 
-    assert load_testcase(output_dir, "a")["summary"] == "a"
-    assert error_codes(file_entry(load_report(output_dir), "a.docx")) == []
+    assert final_entries(output_dir) == []
+    assert error_codes(file_entry(load_report(output_dir), "a.docx")) == ["required_field_missing"]
 
 
 def test_ordnername_konflikt_wird_erkannt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:

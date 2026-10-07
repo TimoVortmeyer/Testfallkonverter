@@ -16,7 +16,7 @@ def test_preflight_schreibt_profiltreffer_und_pruefgruende(tmp_path: Path, capsy
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     build_lunar_docx(input_dir / "treffer.docx")
-    build_lunar_docx(input_dir / "kein_treffer.docx", DocSpec(include_testablauf=False))
+    build_lunar_docx(input_dir / "kein_treffer.docx", DocSpec(include_kurzbeschreibung=False, include_testablauf=False))
     csv_path = tmp_path / "reports" / "profile.csv"
 
     result = main(["preflight", "--input-dir", str(input_dir), "--csv-path", str(csv_path), "--config-dir", str(CONFIG_DIR)])

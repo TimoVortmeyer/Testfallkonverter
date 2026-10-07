@@ -26,7 +26,7 @@ def test_standardprofile_werden_geladen() -> None:
     assert {"lunar_legacy_v1", "lunar_standard_v1"} <= set(ids)
     assert ids == sorted(ids)
     profile = next(p for p in profiles if p.id == "lunar_standard_v1")
-    assert profile.required_markers == ("Testablauf", "Kurzbeschreibung")
+    assert profile.required_markers == ("Kurzbeschreibung",)
     assert "Erwartete Ergebnisse" in profile.required_columns
     assert "Testfall" in profile.aliases_for("testfallname")
 

@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from .models import CheckboxRef, ImageKind, ImageRef, Segment, SourceBlock, SourceCell, SourceParagraph, SourceRow, SourceTable, VMerge
+from .models import CheckboxRef, ImageKind, ImageRef, Issue, Segment, SourceBlock, SourceCell, SourceParagraph, SourceRow, SourceTable, VMerge
 
 NAMESPACES: dict[str, str] = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
@@ -36,6 +36,27 @@ def qn(prefixed: str) -> str:
 
 
 W_P = qn("w:p")
+W_PPR = qn("w:pPr")
+W_PSTYLE = qn("w:pStyle")
+W_NUM_PR = qn("w:numPr")
+W_NUM_ID = qn("w:numId")
+W_ILVL = qn("w:ilvl")
+W_IND = qn("w:ind")
+W_LEFT = qn("w:left")
+W_NUM = qn("w:num")
+W_NUM_ID_ATTR = qn("w:numId")
+W_ABSTRACT_NUM_ID = qn("w:abstractNumId")
+W_ABSTRACT_NUM = qn("w:abstractNum")
+W_ABSTRACT_NUM_ID_ATTR = qn("w:abstractNumId")
+W_LVL = qn("w:lvl")
+W_NUM_FMT = qn("w:numFmt")
+W_LVL_TEXT = qn("w:lvlText")
+W_START = qn("w:start")
+W_RPR = qn("w:rPr")
+W_R = qn("w:r")
+W_R_FONTS = qn("w:rFonts")
+W_ASCII = qn("w:ascii")
+W_HANSI = qn("w:hAnsi")
 W_TBL = qn("w:tbl")
 W_TR = qn("w:tr")
 W_TC = qn("w:tc")
@@ -82,6 +103,17 @@ _SYMBOL_CHECKBOX_GLYPHS = {
     ("wingdings 2", "0052"): True,
     ("wingdings 2", "00a3"): False,
 }
+_WINGDINGS_GLYPHS = {
+    ("wingdings", "6c"): "•",
+    ("wingdings", "6e"): "▪",
+    ("wingdings", "6f"): "▫",
+    ("wingdings", "d8"): "→",
+    ("wingdings", "e0"): "→",
+    ("wingdings", "e1"): "↑",
+    ("wingdings", "e2"): "↓",
+    ("wingdings", "e3"): "↔",
+    ("wingdings", "e4"): "↕",
+}
 
 # Elemente ohne sichtbaren Inhalt oder mit gelöschtem/verstecktem Inhalt.
 _SKIPPED_INLINE_TAGS = frozenset(
@@ -124,16 +156,30 @@ StyleClassifier = Callable[[str | None], bool]
 class BodyTraversal:
     """Erzeugt das technische Quellmodell aus dem ``w:body``-Element."""
 
-    def __init__(self, resolve_image: ImageResolver, is_heading_style: StyleClassifier) -> None:
+    def __init__(
+        self,
+        resolve_image: ImageResolver,
+        is_heading_style: StyleClassifier,
+        numbering: Any | None = None,
+        styles: Any | None = None,
+    ) -> None:
         self._resolve_image = resolve_image
         self._is_heading_style = is_heading_style
+        self._numbering = numbering
+        self._styles = styles
         self._images: list[ImageRef] = []
+        self._warnings: list[Issue] = []
+        self._list_counters: dict[tuple[int, int], int] = {}
         self._table_count = 0
         self._paragraph_count = 0
 
     @property
     def images(self) -> list[ImageRef]:
         return list(self._images)
+
+    @property
+    def warnings(self) -> list[Issue]:
+        return list(self._warnings)
 
     def traverse(self, body: Any) -> list[SourceBlock]:
         blocks: list[SourceBlock] = []
@@ -188,13 +234,24 @@ class BodyTraversal:
         has_outline = p.find(f"{qn('w:pPr')}/{qn('w:outlineLvl')}") is not None
         segments: list[Segment] = []
         self._walk_inline(p, segments, location, floating=False)
+        prefix = self._paragraph_prefix(p, segments, location)
+        if prefix:
+            segments.insert(0, prefix)
         return SourceParagraph(
             segments=_merge_text_segments(segments),
             style_id=style_id,
             is_heading=has_outline or self._is_heading_style(style_id),
         )
 
-    def _walk_inline(self, element: Any, segments: list[Segment], location: str, *, floating: bool) -> None:
+    def _walk_inline(
+        self,
+        element: Any,
+        segments: list[Segment],
+        location: str,
+        *,
+        floating: bool,
+        font: str | None = None,
+    ) -> None:
         for child in element:
             tag = child.tag
             if not isinstance(tag, str):
@@ -206,7 +263,8 @@ class BodyTraversal:
                         segments.append(CheckboxRef(_form_checkbox_checked(checkbox)))
                 continue
             if tag == W_SYM:
-                _append_symbol_checkbox(child, segments)
+                if not _append_symbol_checkbox(child, segments):
+                    self._append_symbol(child, segments, location)
                 continue
             if tag in _SKIPPED_INLINE_TAGS:
                 continue
@@ -217,10 +275,17 @@ class BodyTraversal:
                     value = checked.get(W14_VAL, "1").casefold() if checked is not None else "0"
                     segments.append(CheckboxRef(checked is not None and value not in {"0", "false", "off"}))
                 else:
-                    self._walk_inline(child, segments, location, floating=floating)
+                    self._walk_inline(child, segments, location, floating=floating, font=font)
+            elif tag == W_R:
+                run_properties = child.find(W_RPR)
+                fonts = run_properties.find(W_R_FONTS) if run_properties is not None else None
+                run_font = None
+                if fonts is not None:
+                    run_font = fonts.get(W_ASCII) or fonts.get(W_HANSI)
+                self._walk_inline(child, segments, location, floating=floating, font=run_font or font)
             elif tag == W_T:
                 if child.text:
-                    _append_text_with_checkboxes(child.text, segments)
+                    self._append_run_text(child.text, segments, font, location)
             elif tag in (W_TAB, W_PTAB):
                 segments.append("\t")
             elif tag in (W_BR, W_CR):
@@ -232,7 +297,189 @@ class BodyTraversal:
             elif tag in (W_DRAWING, W_PICT, W_OBJECT):
                 self._walk_graphic(child, segments, location, floating=floating)
             else:
-                self._walk_inline(child, segments, location, floating=floating)
+                self._walk_inline(child, segments, location, floating=floating, font=font)
+
+    def _append_run_text(self, text: str, segments: list[Segment], font: str | None, location: str) -> None:
+        if not font or not font.casefold().startswith("wingdings"):
+            _append_text_with_checkboxes(text, segments)
+            return
+        buffer = ""
+        for character in text:
+            checked = _CHECKBOX_GLYPHS.get(character)
+            if checked is not None:
+                if buffer:
+                    segments.append(buffer)
+                    buffer = ""
+                segments.append(CheckboxRef(checked))
+                continue
+            glyph = _wingdings_glyph(font, f"{ord(character):04x}")
+            if glyph is None:
+                if buffer:
+                    segments.append(buffer)
+                    buffer = ""
+                replacement = f"[Wingdings U+{ord(character):04X}]"
+                segments.append(replacement)
+                self._warn_unknown_wingdings(location, ord(character))
+            else:
+                buffer += glyph
+        if buffer:
+            segments.append(buffer)
+
+    def _append_symbol(self, symbol: Any, segments: list[Segment], location: str) -> None:
+        font = (symbol.get(W_FONT) or "").strip()
+        raw_character = (symbol.get(W_CHAR) or "").removeprefix("0x")
+        try:
+            codepoint = int(raw_character, 16)
+        except ValueError:
+            codepoint = 0
+        glyph = _wingdings_glyph(font, raw_character.casefold()) if font.casefold().startswith("wingdings") else None
+        if glyph is not None:
+            segments.append(glyph)
+            return
+        replacement = f"[{font or 'Word-Symbol'} U+{codepoint:04X}]"
+        segments.append(replacement)
+        if font.casefold().startswith("wingdings"):
+            self._warn_unknown_wingdings(location, codepoint)
+        else:
+            self._warnings.append(
+                Issue(code="unsupported_word_symbol", message=f"{location}: Nicht unterstütztes Word-Symbol {replacement}.")
+            )
+
+    def _warn_unknown_wingdings(self, location: str, codepoint: int) -> None:
+        self._warnings.append(
+            Issue(
+                code="unsupported_wingdings_glyph",
+                message=f"{location}: Unbekanntes Wingdings-Zeichen U+{codepoint:04X}; als Textmarkierung übernommen.",
+            )
+        )
+
+    def _paragraph_prefix(self, paragraph: Any, segments: list[Segment], location: str) -> str:
+        properties = paragraph.find(W_PPR)
+        style_element = properties.find(W_PSTYLE) if properties is not None else None
+        style_id = style_element.get(W_VAL) if style_element is not None else None
+        num_properties = properties.find(W_NUM_PR) if properties is not None else None
+        if num_properties is None and style_id and self._styles is not None:
+            style = next(
+                (item for item in self._styles.findall(qn("w:style")) if item.get(qn("w:styleId")) == style_id),
+                None,
+            )
+            style_properties = style.find(W_PPR) if style is not None else None
+            num_properties = style_properties.find(W_NUM_PR) if style_properties is not None else None
+        num_id_element = num_properties.find(W_NUM_ID) if num_properties is not None else None
+        level_element = num_properties.find(W_ILVL) if num_properties is not None else None
+        num_id = _int_value(num_id_element, W_VAL, default=-1)
+        level = max(0, _int_value(level_element, W_VAL, default=0))
+        definition = self._list_definition(num_id, level, style_id)
+        if definition is not None:
+            num_id, level, number_format, level_text, font, start, list_indent = definition
+            marker = self._list_marker(num_id, level, number_format, level_text, font, start, location)
+            indent_level = max(level, max(0, (list_indent - 360 + 359) // 360))
+        else:
+            marker = ""
+            indent = properties.find(W_IND) if properties is not None else None
+            left_twips = _int_value(indent, W_LEFT, default=0)
+            indent_level = (left_twips + 359) // 360 if left_twips > 0 else 0
+
+        leading_level = _strip_leading_indentation(segments)
+        indent_level = max(indent_level, leading_level)
+        hierarchy = "↳ " * min(indent_level, 8)
+        return f"{hierarchy}{marker} " if marker else hierarchy
+
+    def _list_definition(
+        self, num_id: int, level: int, style_id: str | None
+    ) -> tuple[int, int, str, str, str, int, int] | None:
+        if self._numbering is None:
+            return None
+        abstract_id = None
+        resolved_num_id = num_id
+        if num_id >= 0:
+            for number in self._numbering.findall(W_NUM):
+                if _int_value(number, W_NUM_ID_ATTR, default=-1) == num_id:
+                    abstract_element = number.find(W_ABSTRACT_NUM_ID)
+                    abstract_id = _int_value(abstract_element, W_VAL, default=-1)
+                    break
+        elif style_id:
+            for abstract in self._numbering.findall(W_ABSTRACT_NUM):
+                for candidate_level in abstract.findall(W_LVL):
+                    candidate_style = candidate_level.find(W_PSTYLE)
+                    if candidate_style is not None and candidate_style.get(W_VAL) == style_id:
+                        abstract_id = _int_value(abstract, W_ABSTRACT_NUM_ID_ATTR, default=-1)
+                        break
+                if abstract_id is not None:
+                    break
+            if abstract_id is not None:
+                resolved_num_id = -abstract_id - 1
+        if abstract_id is None or abstract_id < 0:
+            return None
+        abstract = next(
+            (item for item in self._numbering.findall(W_ABSTRACT_NUM) if _int_value(item, W_ABSTRACT_NUM_ID_ATTR, default=-1) == abstract_id),
+            None,
+        )
+        if abstract is None:
+            return None
+        resolved_level = level
+        level_element = next(
+            (item for item in abstract.findall(W_LVL) if _int_value(item, qn("w:ilvl"), default=0) == level),
+            None,
+        )
+        if level_element is None and style_id:
+            for candidate_level in abstract.findall(W_LVL):
+                candidate_style = candidate_level.find(W_PSTYLE)
+                if candidate_style is not None and candidate_style.get(W_VAL) == style_id:
+                    level_element = candidate_level
+                    resolved_level = _int_value(candidate_level, qn("w:ilvl"), default=0)
+                    break
+        if level_element is None:
+            return None
+        format_element = level_element.find(W_NUM_FMT)
+        text_element = level_element.find(W_LVL_TEXT)
+        start_element = level_element.find(W_START)
+        run_properties = level_element.find(W_RPR)
+        fonts = run_properties.find(W_R_FONTS) if run_properties is not None else None
+        font = (fonts.get(W_ASCII) or fonts.get(W_HANSI) or "") if fonts is not None else ""
+        paragraph_properties = level_element.find(W_PPR)
+        indentation = paragraph_properties.find(W_IND) if paragraph_properties is not None else None
+        return (
+            resolved_num_id,
+            resolved_level,
+            format_element.get(W_VAL, "bullet") if format_element is not None else "bullet",
+            text_element.get(W_VAL, "•") if text_element is not None else "•",
+            font,
+            _int_value(start_element, W_VAL, default=1),
+            _int_value(indentation, W_LEFT, default=0),
+        )
+
+    def _list_marker(
+        self,
+        num_id: int,
+        level: int,
+        number_format: str,
+        level_text: str,
+        font: str,
+        start: int,
+        location: str,
+    ) -> str:
+        if number_format == "bullet":
+            character = level_text[0] if level_text else "•"
+            if font.casefold().startswith("wingdings"):
+                glyph = _wingdings_glyph(font, f"{ord(character):04x}")
+                if glyph is None:
+                    self._warn_unknown_wingdings(location, ord(character))
+                    return f"[Wingdings U+{ord(character):04X}]"
+                return glyph
+            if 0xE000 <= ord(character) <= 0xF8FF:
+                return "•"
+            return character
+        key = (num_id, level)
+        count = self._list_counters.get(key, start - 1) + 1
+        self._list_counters[key] = count
+        for deeper in [item for item in self._list_counters if item[0] == num_id and item[1] > level]:
+            del self._list_counters[deeper]
+        rendered = level_text
+        for marker_level in range(1, level + 2):
+            marker_count = self._list_counters.get((num_id, marker_level - 1), count)
+            rendered = rendered.replace(f"%{marker_level}", str(marker_count))
+        return rendered
 
     def _walk_alternate_content(self, element: Any, segments: list[Segment], location: str, *, floating: bool) -> None:
         # Nur die erste Variante auswerten, sonst würden Bilder aus mc:Fallback doppelt gezählt.
@@ -323,12 +570,14 @@ def _form_checkbox_checked(checkbox: Any) -> bool:
     return state.get(W_VAL, "1").casefold() not in {"0", "false", "off"}
 
 
-def _append_symbol_checkbox(symbol: Any, segments: list[Segment]) -> None:
+def _append_symbol_checkbox(symbol: Any, segments: list[Segment]) -> bool:
     font = (symbol.get(W_FONT) or "").strip().casefold()
     character = (symbol.get(W_CHAR) or "").casefold().removeprefix("0x")
     checked = _SYMBOL_CHECKBOX_GLYPHS.get((font, character))
     if checked is not None:
         segments.append(CheckboxRef(checked))
+        return True
+    return False
 
 
 def _append_text_with_checkboxes(text: str, segments: list[Segment]) -> None:
@@ -349,6 +598,50 @@ def _append_text_with_checkboxes(text: str, segments: list[Segment]) -> None:
 def _int_attribute(element: Any, *, default: int) -> int:
     if element is None:
         return default
+
+
+def _int_value(element: Any, attribute: str, *, default: int) -> int:
+    if element is None:
+        return default
+    try:
+        return int(element.get(attribute, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _strip_leading_indentation(segments: list[Segment]) -> int:
+    indentation = ""
+    for index, segment in enumerate(segments):
+        if not isinstance(segment, str):
+            break
+        if not segment:
+            continue
+        match = re.match(r"^[ \t]+", segment)
+        if match is not None:
+            indentation += match.group(0)
+            segments[index] = segment[len(match.group(0)) :]
+            if segments[index]:
+                break
+            continue
+        break
+    if not indentation:
+        return 0
+    spaces = len(indentation.replace("\t", ""))
+    return max(indentation.count("\t"), spaces // 4, 1)
+
+
+def _wingdings_glyph(font: str, character: str) -> str | None:
+    family = font.strip().casefold()
+    try:
+        codepoint = int(character.casefold().removeprefix("0x"), 16)
+    except ValueError:
+        return None
+    if 0xF000 <= codepoint <= 0xF0FF:
+        codepoint -= 0xF000
+    code = f"{codepoint:02x}"
+    if family == "wingdings":
+        return _WINGDINGS_GLYPHS.get((family, code))
+    return None
     try:
         return int(element.get(W_VAL, default))
     except (TypeError, ValueError):

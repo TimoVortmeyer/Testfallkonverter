@@ -74,7 +74,7 @@ def test_profile_override_prueft_nur_ein_profil(
 
 
 def test_profile_override_ohne_fallback(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
-    build_lunar_docx(input_dir / "a.docx", DocSpec(include_testablauf=False))
+    build_lunar_docx(input_dir / "a.docx", DocSpec(include_kurzbeschreibung=False, include_testablauf=False))
 
     assert run_convert("--profile", "lunar_standard_v1") == 1
 
@@ -91,7 +91,10 @@ def test_unbekanntes_profil_ist_globaler_fehler(input_dir: Path, output_dir: Pat
 
 
 def test_profilerkennung_ignoriert_dateinamen(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
-    build_lunar_docx(input_dir / "lunar_standard_v1_Testablauf.docx", DocSpec(include_testablauf=False))
+    build_lunar_docx(
+        input_dir / "lunar_standard_v1_Testablauf.docx",
+        DocSpec(include_kurzbeschreibung=False, include_testablauf=False),
+    )
 
     assert run_convert() == 1
     assert error_codes(file_entry(load_report(output_dir), "lunar_standard_v1_Testablauf.docx")) == ["no_matching_profile"]

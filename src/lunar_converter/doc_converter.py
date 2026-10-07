@@ -12,7 +12,7 @@ import subprocess
 from importlib.resources import as_file, files
 from pathlib import Path
 
-from .exceptions import ConfigurationError, DocConversionError
+from .exceptions import ConfigurationError, DocConversionError, OutputDirectoryError
 from .filesystem import prepare_output_directory
 from .source_discovery import discover_source_files
 
@@ -40,6 +40,7 @@ def build_conversion_command(
     *,
     recursive: bool = False,
     show_progress: bool = False,
+    skip_existing: bool = False,
 ) -> list[str]:
     command = [
         str(powershell),
@@ -56,6 +57,8 @@ def build_conversion_command(
         command.append("-Recurse")
     if show_progress:
         command.append("-ShowProgress")
+    if skip_existing:
+        command.append("-SkipExisting")
     return command
 
 
@@ -119,8 +122,17 @@ def prepare_docx_directory(input_dir: Path, output_dir: Path) -> tuple[int, int]
     source_files = discover_source_files(input_dir)
     if not source_files:
         return 0, 0
-    prepare_output_directory(output_dir, protected_dir=input_dir)
     powershell = find_powershell()
+    skip_existing = False
+    if output_dir.exists() and output_dir.is_dir() and any(output_dir.iterdir()):
+        answer = _ask_existing_output_action(output_dir)
+        if answer == "delete":
+            prepare_output_directory(output_dir, protected_dir=input_dir, existing_policy="clear")
+        else:
+            prepare_output_directory(output_dir, protected_dir=input_dir, existing_policy="preserve")
+            skip_existing = True
+    else:
+        prepare_output_directory(output_dir, protected_dir=input_dir)
 
     with as_file(files("lunar_converter").joinpath("resources").joinpath(WORD_SCRIPT_NAME)) as script:
         command = build_conversion_command(
@@ -130,6 +142,7 @@ def prepare_docx_directory(input_dir: Path, output_dir: Path) -> tuple[int, int]
             output_dir,
             recursive=True,
             show_progress=True,
+            skip_existing=skip_existing,
         )
         try:
             completed = subprocess.run(
@@ -146,3 +159,21 @@ def prepare_docx_directory(input_dir: Path, output_dir: Path) -> tuple[int, int]
                 details=f"Befehl: {command}\n{type(exc).__name__}: {exc}",
             ) from exc
     return len(source_files), completed.returncode
+
+
+def _ask_existing_output_action(output_dir: Path) -> str:
+    try:
+        answer = input(
+            f"Output-Ordner '{output_dir}' ist nicht leer. "
+            "[L] Löschen und neu starten / [N] Nicht löschen, vorhandene DOCX überspringen / [A] Abbrechen: "
+        )
+    except EOFError:
+        answer = ""
+    normalized = answer.strip().casefold()
+    if normalized in {"l", "löschen", "loeschen", "j", "ja"}:
+        return "delete"
+    if normalized in {"n", "nein", "nicht löschen", "nicht loeschen", "beibehalten"}:
+        return "preserve"
+    raise OutputDirectoryError(
+        f"DOCX-Vorbereitung abgebrochen; Output-Ordner '{output_dir}' wurde nicht verändert."
+    )

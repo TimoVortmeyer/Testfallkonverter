@@ -134,6 +134,19 @@ bleiben unverändert. Für die folgenden Prozesse verwendest du den Zielordner
 als Eingabe. Der PowerShell-Fortschrittsbalken zeigt Dateien, Status und
 Zeitprognose.
 
+Ist der Zielordner bereits nicht leer, fragt `prepare-docx` nach einer von drei
+Aktionen:
+
+- `Löschen`: Der gesamte Zielordner wird nach Bestätigung gelöscht und neu aufgebaut.
+- `Nicht Löschen`: Der Ordner bleibt erhalten. Für jede Quelle wird das entsprechende
+  Ziel-`.docx` geprüft; vorhandene Dateien werden unverändert übersprungen, fehlende
+  werden konvertiert oder kopiert.
+- `Abbrechen` (auch leere oder ungültige Eingabe): Der Lauf endet, ohne den Zielordner
+  zu verändern.
+
+Ein noch nicht vorhandener Zielordner wird angelegt und normal befüllt. Beim
+Überspringen wird weder Inhalt noch Aktualität einer vorhandenen `.docx` geprüft.
+
 ```powershell
 .\start_testfallkonverter.cmd preflight --input-dir .\input_docx --csv-path .\output\preflight.csv
 .\start_testfallkonverter.cmd verantwortliche --input-dir .\input_docx --csv-path .\output\verantwortliche.csv
@@ -273,9 +286,13 @@ Ausgabe je erfolgreicher Quelldatei:
 Der Output ist auch bei Unterordnern im Eingabeordner **flach** (eine Ebene
 Testfallordner), weil der Importer `<ordner>/*/testcase.json` liest.
 
-Der Ordnername wird ausschließlich aus dem Dateinamen gebildet (nie aus der
-Summary). Auch die `summary` in `testcase.json` wird aus dem Dateinamen ohne
-`.doc`- oder `.docx`-Endung gebildet. Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen)
+Der Ordnername wird ausschließlich aus dem Dateinamen gebildet und bleibt von
+der fachlichen Summary getrennt. `summary` wird aus dem im Dokument erkannten
+Feld `Testfallname` (Profilalias `testfallname`, zum Beispiel `Testfall: <Name>`)
+übernommen. Fehlt der Name oder ist er leer, wird die Datei mit
+`required_field_missing` abgelehnt; mehrere unterschiedliche Namensfelder
+erzeugen eine Reportwarnung und ebenfalls eine leere, damit abgelehnte Summary.
+Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen)
 und – wie im POC – Leerraum werden durch `_` ersetzt; reservierte Windows-Namen (`CON`, `NUL`, …)
 erhalten ein `_`. Ergeben zwei Quelldateien denselben Ordnernamen (z. B.
 `Test Fall.docx` und `Test_Fall.docx` oder gleichnamige Dateien in verschiedenen
@@ -301,9 +318,9 @@ Für jedes Dokument werden alle Profile aus `config/profiles/*.json` geprüft �
 1. alle `required_markers` im normalisierten Dokumenttext vorkommen,
 2. eine Tabelle alle `step_table.required_columns` abdeckt (Kopfzeile in den
    ersten drei Tabellenzeilen; Spaltennamen-Varianten über `field_aliases`),
-3. mindestens eine fachlich befüllte Schrittzeile vorhanden ist (mindestens eine
-   der Spalten System, Beschreibung, Erwartetes/Tatsächliches Ergebnis enthält
-   Text oder Bild).
+3. mindestens eine fachlich befüllte Schrittzeile vorhanden ist (`action` oder
+  `expected_result` enthält Text oder Bild; bei `gh_standard_v1` zählt auch die
+  Profilspalte `Eingabedaten / besondere Angaben` als Action-Inhalt).
 
 | Ergebnis | Verhalten |
 |---|---|
@@ -327,7 +344,7 @@ Profile sind klein und deklarativ. Erlaubt sind **ausschließlich**:
 {
   "id": "lunar_standard_v1",
   "name": "Standard-Testfall mit Systemspalte (LUNAR und EDDI)",
-  "required_markers": ["Testablauf", "Kurzbeschreibung"],
+  "required_markers": ["Kurzbeschreibung"],
   "step_table": {
     "required_columns": ["System / Komponente", "Beschreibung des Testschritts", "Erwartete Ergebnisse"]
   },
@@ -375,9 +392,9 @@ Informationen und Schritttabelle:
 | Dokumentteil | Erkennung | Ziel-JSON |
 |---|---|---|
 | Deckblatt: Label | Erster nichtleerer Absatz der ersten Zelle der Deckblatt-Tabelle | `labels`: einzelnes Label, z. B. `RWWS` oder `RWWS-GH` |
-| Deckblatt: Prozesspfad | Nummerierte Prozesszeilen und alle nichtleeren Deckblattabsätze danach bis zur Testfall-Zeile, in Dokumentreihenfolge | `custom_fields.customfield_15909` = `"Prozess1/Prozess2/Prozess3/…"` |
-| Deckblatt: optionale Testfallbeschreibung | Zeilen zwischen letzter Prozesszeile und Testfall-Zeile, ohne Zeilenumbrüche zusammengeführt | `description`: `h1. <Testfallbeschreibung>` |
-| Deckblatt: `Testfall: <Name>` | Alias `testfallname` | kein Zielfeld; `summary` kommt aus dem Quelldateinamen |
+| Deckblatt: Prozesspfad | Nummerierte Prozesszeilen vor der Testfall-Zeile, in Dokumentreihenfolge | `custom_fields.customfield_15909` = `"Prozess1/Prozess2/…"` |
+| Deckblatt: optionale Testfallbeschreibung | Nicht nummerierte Absätze nach der letzten Prozesszeile und vor der Testfall-Zeile | `description`: `h1. <Testfallbeschreibung>` |
+| Deckblatt: `Testfall: <Name>` | Profilalias `testfallname` | `summary` |
 | Tabelle mit zentralen Informationen | Tabelle mit den Bezeichnern aus `info_table.required_labels`, sonst letzte Tabelle vor der Schritttabelle; nie die Deckblatt-Tabelle | an `description` angehängte Jira-Wiki-Tabelle |
 | Schritttabelle | Pflichtspalten des Profils | `steps[]` (wie bisher) |
 
@@ -388,6 +405,11 @@ globale Screenshots exportiert.
 Bekannte Jira-Emoticon-Kürzel in Quelldaten werden escaped, damit Jira sie als
 Text darstellt. Word-Checkboxen in der Info-Tabelle werden gezielt als `(/)`
 (angekreuzt) bzw. `(x)` (leer) ausgegeben.
+Wingdings-Zeichen in Text-Runs und Word-Symbolen werden, soweit bekannt,
+semantisch in Unicode-Pfeile oder Aufzählungszeichen umgewandelt. Nummerierung,
+Listenebene, Absatzeinzug und führende Tabulatoren bleiben als Bullet- bzw.
+Hierarchiemarker sichtbar. Unbekannte Glyphen werden mit einer Textmarkierung
+ausgegeben und im Report mit Dokument und Fundstelle gewarnt.
 Labels ersetzen Whitespace durch `_` und werden auf maximal 255 Zeichen gekürzt;
 zulässig sind im Import 1 bis 255 Zeichen ohne Whitespace.
 
@@ -444,11 +466,13 @@ Verantwortliche wird separat als Label oder `reporter_email` behandelt (siehe
 | Bild in der Tabelle mit zentralen Informationen | globales `screenshots` + Anker in der Wiki-Tabelle der `description` |
 | Bild in Zelle „Beschreibung des Testschritts“ | `steps[].attachments` + Anker in `steps[].action` |
 | Bild in Zelle „Erwartete Ergebnisse“ | `steps[].attachments` + Anker in `steps[].expected_result` |
-| Bild in Zelle „Tatsächliche Ergebnisse“ | `steps[].attachments` + Anker im Block „Tatsächliches Ergebnis“ |
+| Bild in Zelle „Tatsächliche Ergebnisse“ | wird ignoriert |
 | Bild außerhalb von Feldern, in Spalte System/Schritt-Nr., im Testfallnamen, frei positioniert (schwebend) | globales `screenshots`, **kein** Anker, Warnung `image_assignment_unclear` |
 
 Anker haben exakt das Format `!0001.png!` und werden an der Bildposition im
-Text eingefügt. Grundsatz: bei Unsicherheit Testfall-Anhang statt Schritt-Anhang.
+Text eingefügt. Nur Dateinamen ohne Pfadbestandteile mit `.png`, `.jpg`, `.jpeg`,
+`.gif` oder `.webp` sind Anker; gewöhnliche Ausrufezeichen bleiben unverändert.
+Grundsatz: bei Unsicherheit Testfall-Anhang statt Schritt-Anhang.
 Ein Schritt-Anhang erscheint nie zusätzlich in den globalen `screenshots`.
 `steps[].screenshots` wird derzeit immer leer ausgegeben.
 
@@ -457,7 +481,7 @@ Ein Schritt-Anhang erscheint nie zusätzlich in den globalen `screenshots`.
 Logformat (UTF-8): `Zeitstempel Level [Datei: …] [Profil: …] Meldung`.
 
 - `INFO`: Start, Ende, erkannte Profile, erfolgreiche Exporte,
-- `WARNING`: nicht unterstützte Bilder, unklare Bildzuordnung, ignorierte Layout-Zeilen,
+- `WARNING`: nicht unterstützte Bilder oder Wingdings-Zeichen, unklare Bildzuordnung, ignorierte Layout-Zeilen,
 - `ERROR`: Datei-, Profil-, Pflichtfeld-, Validierungs- und Exportfehler,
 - `DEBUG`: Profilprüfungen im Detail, technische Details, Stacktraces.
 
@@ -523,34 +547,31 @@ Fehlercodes je Datei: `input_file_error`, `doc_conversion_failed`,
 Fehler einer Datei brechen den Batch nicht ab. Mit `--fail-fast` werden die
 restlichen Dateien als `skipped` gemeldet.
 
-Pflichtregeln: `summary` (= Quelldateiname ohne `.doc`/`.docx`) nicht leer, mindestens ein Schritt,
-je Schritt `system` und `action` nicht leer. Alle Pflichtfeldfehler eines
+Pflichtregeln: `summary` (= Feld `Testfallname`) nicht leer, mindestens ein
+Schritt. Eine Tabellenzeile wird nur übernommen, wenn `action` oder
+`expected_result` einschließlich zugeordneter Bilder Inhalt hat. Fehlt eine
+Seite, wird sie als `-` ausgegeben; sind beide leer, wird die Zeile ignoriert.
+Leeres `system` wird zu `nicht definiert`. Alle Pflichtfeldfehler eines
 Dokuments werden gemeinsam gemeldet.
 
 Übergreifende Platzhalterregeln (profilunabhängig, nur im Ziel-Renderer):
 
 | Situation | Wert im Ziel-JSON |
 |---|---|
-| Erwartetes Ergebnis leer | `expected_result = "-"` (keine Warnung) |
+| Erwartetes Ergebnis leer, Action gefüllt | `expected_result = "-"` (keine Warnung) |
+| Action leer, Expected Result gefüllt | `action = "-"` |
+| Action und Expected Result leer | Tabellenzeile wird ignoriert |
 | Schritttabelle hat keine Systemspalte (z. B. `lunar_legacy_v1`, `gh_standard_v1`) | `system = "nicht definiert"` |
 | Systemspalte vorhanden, Zelle aber leer (z. B. Folgezeilen ohne Schritt-Nr.) | `system = "nicht definiert"` |
-| Eingabedaten vorhanden | Werden mit `\n` an `action` angehängt; `data = ""` |
+| `gh_standard_v1`: Eingabedaten vorhanden | Text und Bilder werden nach der Geschäftsprozess-Aktion an `action` angehängt; `data = ""` |
 | Keine Eingabedaten-Spalte | `data = ""` |
 
-## 15. Übergangslösung für tatsächliche Ergebnisse
+## 15. Tatsächliche Ergebnisse
 
-Das Ziel-JSON hat kein eigenes Feld für tatsächliche Ergebnisse. Der
-Ziel-Renderer (nur dort!) hängt für alle Profile einen Block an:
-
-```text
-<Erwartetes Ergebnis>
-
-h3. Tatsächliches Ergebnis
-<Tatsächliches Ergebnis>
-```
-
-Der Block wird angehängt, wenn ein tatsächliches Ergebnis vorhanden ist. Ist das
-erwartete Ergebnis leer, steht davor der Platzhalter `-`.
+Das XRAYTC-Zielprofil hat kein belegtes separates Zielfeld für tatsächliche
+Ergebnisse. Die Quellspalte `Tatsächliche Ergebnisse` einschließlich Checkboxen
+und Bildern wird deshalb vollständig ignoriert und nie an `expected_result`
+angehängt.
 
 ## 16. Ziel-JSON und Schema anpassen
 
@@ -563,9 +584,9 @@ erwartete Ergebnis leer, steht davor der Platzhalter `-`.
 - Die Geschäftsprozessstruktur steht unter der Xray-Feld-ID für den
   Testrepository-Pfad `custom_fields.customfield_15909` (`PROCESS_PATH_FIELD`).
 - `schema/testcase.schema.json` (JSON Schema 2020-12) muss bei Änderungen am
-  Renderer mitgepflegt werden. Bildreferenzen müssen dem Muster `*.png` ohne
-  Pfadanteile entsprechen. Neue Felder sind wegen `additionalProperties: false`
-  im Schema zu ergänzen.
+  Renderer mitgepflegt werden. Bildreferenzen müssen einen sicheren Dateinamen
+  mit unterstützter Bildendung und ohne Pfadanteile haben. Neue Felder sind
+  wegen `additionalProperties: false` im Schema zu ergänzen.
 
 ## 17. Tests
 
