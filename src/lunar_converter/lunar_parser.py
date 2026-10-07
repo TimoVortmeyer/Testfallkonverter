@@ -156,7 +156,22 @@ class _TestCaseParser:
                 )
             )
             cover.name_lines = []
-        return cover
+        return cover if cover is not None else self._find_name_in_label_cell()
+
+    def _find_name_in_label_cell(self) -> _Cover | None:
+        """Testfallname aus einer Tabellenzeile ``<Bezeichner> | <Wert>`` (z. B. ``Testfalltitel: | TF_1``)."""
+        step_tables = {id(layout.table) for layout in self._layouts}
+        for block in self._document.blocks:
+            if not isinstance(block, SourceTable) or id(block) in step_tables:
+                continue
+            for row in block.rows:
+                for index, cell in enumerate(row.cells[:-1]):
+                    if cell.images or normalize_heading(cell.text) not in self._name_aliases:
+                        continue
+                    value = [paragraph.segments for paragraph in row.cells[index + 1].paragraphs]
+                    if _lines_have_content(value):
+                        return _Cover(name_lines=value, process_path=[], title="", table=None)
+        return None
 
     def _name_value(self, paragraphs: list[SourceParagraph], index: int) -> Lines | None:
         """Liefert den Testfallnamen aus ``Testfall: <Name>`` bzw. aus dem Absatz nach einem reinen Bezeichner."""

@@ -598,6 +598,10 @@ def _append_text_with_checkboxes(text: str, segments: list[Segment]) -> None:
 def _int_attribute(element: Any, *, default: int) -> int:
     if element is None:
         return default
+    try:
+        return int(element.get(W_VAL, default))
+    except (TypeError, ValueError):
+        return default
 
 
 def _int_value(element: Any, attribute: str, *, default: int) -> int:
@@ -642,10 +646,6 @@ def _wingdings_glyph(font: str, character: str) -> str | None:
     if family == "wingdings":
         return _WINGDINGS_GLYPHS.get((family, code))
     return None
-    try:
-        return int(element.get(W_VAL, default))
-    except (TypeError, ValueError):
-        return default
 
 
 def _vmerge(tc: Any) -> VMerge | None:

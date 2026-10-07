@@ -229,6 +229,9 @@ class _FileConverter:
                 log.debug("Details: %s", warning.details)
 
         payload = self._renderer.render(test_case, assignment, source.stem)
+        step_count = len(payload.get("steps", []))
+        if not step_count:
+            log.info("Keine Testschritte enthalten; 'steps' wird nicht in das JSON geschrieben.")
         validate_payload(payload, self._schema, screenshots_dir)
         write_testcase_json(package_dir / TESTCASE_FILE_NAME, payload)
 
@@ -238,7 +241,7 @@ class _FileConverter:
             log.info(
                 "Dry Run: Export wäre nach '%s' erfolgt (%d Schritt(e), %d Bild(er)); es wurde nichts geschrieben.",
                 final_dir,
-                len(payload["steps"]),
+                step_count,
                 len(exported.exported),
             )
         else:
@@ -247,11 +250,11 @@ class _FileConverter:
             log.info(
                 "Export erfolgreich nach '%s' (%d Schritt(e), %d Bild(er)).",
                 final_dir,
-                len(payload["steps"]),
+                step_count,
                 len(exported.exported),
             )
         used_folder_names[folder_name.casefold()] = self._label(source)
-        report.step_count = len(payload["steps"])
+        report.step_count = step_count
         report.exported_image_count = len(exported.exported)
 
     def _apply_responsible_mapping(

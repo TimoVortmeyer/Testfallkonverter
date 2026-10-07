@@ -1,0 +1,48 @@
+{
+  "id": "fico_standard_v1",
+  "name": "FiCO-Testfall mit optionalen Testschritten",
+  "required_markers": [
+    "FiCO",
+    "Testfalltitel",
+    "Testablauf",
+    "Ergebnisprüfung"
+  ],
+  "step_table": {
+    "required_columns": [
+      "Lfd. Nr.",
+      "Beschreibung des Schrittes",
+      "Transaktion/ Report",
+      "Erwartetes Ergebnis",
+      "Tatsächliches Ergebnis / Fehlerbeschreibung"
+    ]
+  },
+  "info_table": {
+    "required_labels": [
+      "Testfalltitel",
+      "Kurzbeschreibung",
+      "Testvoraussetzungen",
+      "Erwartetes Ergebnis",
+      "Ergebnisprüfung"
+    ]
+  },
+  "field_aliases": {
+    "testfallname": [
+      "Testfalltitel"
+    ],
+    "schritt_nummer": [
+      "Lfd. Nr."
+    ],
+    "system": [
+      "Transaktion/ Report"
+    ],
+    "action": [
+      "Beschreibung des Schrittes"
+    ],
+    "expected_result": [
+      "Erwartetes Ergebnis"
+    ],
+    "actual_result": [
+      "Tatsächliches Ergebnis / Fehlerbeschreibung"
+    ]
+  }
+}

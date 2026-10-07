@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from docx import Document
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+
 from tests.fixtures.docx_factory import DocSpec, StepSpec, build_lunar_docx
-from tests.helpers import RunConvert, error_codes, file_entry, final_entries, load_report
+from tests.helpers import RunConvert, error_codes, file_entry, final_entries, load_report, load_testcase
 
 
 def test_dokument_ohne_passendes_profil(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
@@ -45,17 +48,56 @@ def test_mehrere_passende_profile_sind_mehrdeutig(
     assert final_entries(output_dir) == []
 
 
-def test_leere_vorlage_ohne_datenzeile_wird_abgelehnt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
+def test_vorlage_ohne_datenzeile_wird_ohne_steps_exportiert(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
     empty_rows = [StepSpec(number="", system="", action="", expected=""), StepSpec(number="20", system="", action="", expected="")]
     build_lunar_docx(input_dir / "vorlage.docx", DocSpec(steps=empty_rows))
 
-    assert run_convert() == 1
+    assert run_convert() == 0
 
     entry = file_entry(load_report(output_dir), "vorlage.docx")
-    assert entry["profile_detection_status"] == "no_matching_profile"
+    assert entry["profile_detection_status"] == "matched"
     standard = next(check for check in entry["checked_profiles"] if check["profile"] == "lunar_standard_v1")
     assert any("Keine fachlich befüllte Schrittzeile" in reason for reason in standard["reasons"])
-    assert final_entries(output_dir) == []
+    testcase = load_testcase(output_dir, "vorlage")
+    assert "steps" not in testcase
+    assert testcase["summary"] == "TF_Beispiel_001"
+
+
+def test_fico_dokument_ohne_nummerierung_und_mit_name_in_tabellenzelle(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
+    document = Document()
+    document.add_paragraph("Produkt: FiCO")
+    info = document.add_table(rows=5, cols=2)
+    for row, (label, value) in enumerate(
+        [
+            ("Testfalltitel:", "TF_FICO_1"),
+            ("Kurzbeschreibung:", "Kurz"),
+            ("Testvoraussetzungen:", "Keine"),
+            ("Erwartetes Ergebnis:", "OK"),
+            ("Ergebnisprüfung:", "Sichtprüfung"),
+        ]
+    ):
+        info.cell(row, 0).text = label
+        info.cell(row, 1).text = value
+    document.add_paragraph("Testablauf:")
+    header = ("Lfd. Nr.", "Beschreibung des Schrittes", "Transaktion/ Report", "Erwartetes Ergebnis", "Tatsächliches Ergebnis / Fehlerbeschreibung")
+    steps = document.add_table(rows=2, cols=len(header))
+    for column, text in enumerate(header):
+        steps.cell(0, column).text = text
+    part = document.part
+    for rel_id, rel in list(part.rels.items()):
+        if rel.reltype == RT.NUMBERING:
+            part.drop_rel(rel_id)
+    document.save(str(input_dir / "fico.docx"))
+
+    assert run_convert() == 0
+
+    entry = file_entry(load_report(output_dir), "fico.docx")
+    assert entry["detected_profile"] == "fico_standard_v1"
+    testcase = load_testcase(output_dir, "fico")
+    assert testcase["summary"] == "TF_FICO_1"
+    assert "steps" not in testcase
 
 
 def test_profile_override_prueft_nur_ein_profil(

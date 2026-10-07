@@ -56,22 +56,29 @@ def run_preflight(input_dir: Path, csv_path: Path, config_dir: Path, logger: log
             writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, delimiter=";")
             writer.writeheader()
             failed = 0
+            counts = {"matched": 0, "no_matching_profile": 0, "ambiguous_profile": 0, "input_error": 0, "unexpected_error": 0}
             for position, source in enumerate(files):
                 relative_path = relative_display_path(source, input_dir)
                 status = "Konvertiere DOC nach DOCX" if source.suffix.casefold() == ".doc" else "Prüfe Profile"
                 progress.update(position, current=relative_path, status=status)
-                row = _check_file(source, input_dir, profiles)
+                row, error = _check_file(source, input_dir, profiles)
                 writer.writerow(row)
                 if row["status"] != "matched":
                     failed += 1
-                _log_result(logger, row)
+                counts[_summary_category(row)] += 1
+                _log_result(logger, row, error)
                 progress.update(position + 1, current=relative_path, status=str(row["status"]))
             progress.finish()
             logger.info(
-                "Ende des Profil-Preflights: %d gesamt, %d eindeutig erkannt, %d ohne eindeutigen Treffer. CSV: %s",
+                "Ende des Profil-Preflights: %d gesamt, %d eindeutig erkannt, %d ohne eindeutigen Treffer "
+                "(%d kein Profil gefunden, %d mehrere Profile gefunden, %d Eingabefehler, %d unerwartete Fehler). CSV: %s",
                 len(files),
-                len(files) - failed,
+                counts["matched"],
                 failed,
+                counts["no_matching_profile"],
+                counts["ambiguous_profile"],
+                counts["input_error"],
+                counts["unexpected_error"],
                 csv_path,
             )
     except OSError as exc:
@@ -79,7 +86,14 @@ def run_preflight(input_dir: Path, csv_path: Path, config_dir: Path, logger: log
     return len(files), failed
 
 
-def _log_result(logger: logging.Logger, row: dict[str, Any]) -> None:
+def _summary_category(row: dict[str, Any]) -> str:
+    status = str(row["status"])
+    if status in ("matched", "no_matching_profile", "ambiguous_profile"):
+        return status
+    return "unexpected_error" if row["fehlercode"] == "unexpected_error" else "input_error"
+
+
+def _log_result(logger: logging.Logger, row: dict[str, Any], error: BaseException | None = None) -> None:
     log = context_logger(logger, str(row["datei"]), str(row["erkanntes_profil"]))
     status = str(row["status"])
     if status == "matched":
@@ -90,6 +104,8 @@ def _log_result(logger: logging.Logger, row: dict[str, Any]) -> None:
         log.warning("Kein Profil passt.")
     else:
         log.error("Datei konnte nicht geprüft werden (%s): %s", row["fehlercode"], row["fehler"])
+        if error is not None:
+            log.debug("Stacktrace:", exc_info=(type(error), error, error.__traceback__))
     if row["profilpruefungen"] != "[]":
         checks = json.loads(str(row["profilpruefungen"]))
         for check in checks:
@@ -97,7 +113,7 @@ def _log_result(logger: logging.Logger, row: dict[str, Any]) -> None:
             check_log.debug("Profilprüfung: %s – %s", "passt" if check["matched"] else "passt nicht", " ".join(check["reasons"]))
 
 
-def _check_file(source: Path, input_dir: Path, profiles: list[ProfileDefinition]) -> dict[str, Any]:
+def _check_file(source: Path, input_dir: Path, profiles: list[ProfileDefinition]) -> tuple[dict[str, Any], Exception | None]:
     row: dict[str, Any] = {
         "datei": relative_display_path(source, input_dir),
         "status": "error",
@@ -123,7 +139,9 @@ def _check_file(source: Path, input_dir: Path, profiles: list[ProfileDefinition]
         row["fehler"] = exc.message
         if exc.details:
             row["fehler"] += f" Details: {exc.details}"
+        return row, exc
     except Exception as exc:
         row["fehlercode"] = "unexpected_error"
         row["fehler"] = f"{type(exc).__name__}: {exc}"
-    return row
+        return row, exc
+    return row, None

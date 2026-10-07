@@ -6,6 +6,10 @@ import csv
 import shutil
 from pathlib import Path
 
+from docx import Document
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
+
 from lunar_converter import preflight
 from lunar_converter.cli import main
 from tests.fixtures.docx_factory import DocSpec, build_lunar_docx
@@ -38,6 +42,53 @@ def test_preflight_schreibt_profiltreffer_und_pruefgruende(tmp_path: Path, capsy
     assert "treffer.docx" in log_content and "lunar_standard_v1" in log_content
     assert "Kein Profil passt" in log_content
     assert "Ende des Profil-Preflights" in log_content
+
+
+def test_preflight_wertet_verbundene_tabellenzellen_aus(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    path = build_lunar_docx(input_dir / "verbunden.docx")
+    document = Document(str(path))
+    table = document.add_table(rows=2, cols=3)
+    table.cell(0, 0).merge(table.cell(0, 2))
+    trailing = table.rows[1]._tr
+    trailing.get_or_add_trPr().append(parse_xml(f'<w:gridBefore {nsdecls("w")} w:val="1"/>'))
+    document.save(str(path))
+    csv_path = tmp_path / "profile.csv"
+
+    result = main(["preflight", "--input-dir", str(input_dir), "--csv-path", str(csv_path), "--config-dir", str(CONFIG_DIR)])
+
+    assert result == 0
+    with csv_path.open(encoding="utf-8-sig", newline="") as source:
+        row = next(csv.DictReader(source, delimiter=";"))
+    assert row["status"] == "matched", row["fehler"]
+
+
+def test_preflight_protokolliert_stacktrace_und_aufschluesselung(tmp_path: Path, monkeypatch) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    build_lunar_docx(input_dir / "a_treffer.docx")
+    build_lunar_docx(input_dir / "b_defekt.docx")
+    original_read = preflight.read_docx
+
+    def flaky_read(path: Path):
+        if path.name == "b_defekt.docx":
+            raise RuntimeError("Testfehler")
+        return original_read(path)
+
+    monkeypatch.setattr(preflight, "read_docx", flaky_read)
+    csv_path = tmp_path / "profile.csv"
+
+    result = main(
+        ["preflight", "--input-dir", str(input_dir), "--csv-path", str(csv_path), "--config-dir", str(CONFIG_DIR), "--log-level", "DEBUG"]
+    )
+
+    assert result == 1
+    log_content = csv_path.with_name(f"{csv_path.stem}.preflight.log").read_text(encoding="utf-8")
+    assert "Traceback (most recent call last)" in log_content
+    assert "RuntimeError: Testfehler" in log_content
+    assert "1 eindeutig erkannt" in log_content
+    assert "0 Eingabefehler, 1 unerwartete Fehler" in log_content
 
 
 def test_preflight_konvertiert_doc_nur_temporär(tmp_path: Path, monkeypatch, capsys) -> None:

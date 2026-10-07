@@ -3,7 +3,7 @@
   "title": "LUNAR testcase import",
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "steps"],
+  "required": ["summary"],
   "$defs": {
     "imageReference": {"type": "string", "pattern": "^[^/\\\\:*?\"<>|!\\r\\n]+\\.(png|jpe?g|gif|webp)$"}
   },

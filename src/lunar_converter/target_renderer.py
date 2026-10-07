@@ -99,8 +99,9 @@ class XrayImportRenderer:
             "components": self.render_components(test_case),
             "custom_fields": self.render_custom_fields(test_case),
             "screenshots": images.global_screenshots,
-            "steps": [self.render_step(step, anchors, images.step_attachments(step.index)) for step in test_case.steps],
         }
+        if test_case.steps:
+            payload["steps"] = [self.render_step(step, anchors, images.step_attachments(step.index)) for step in test_case.steps]
         if test_case.reporter_email:
             payload["reporter_email"] = test_case.reporter_email
         return payload

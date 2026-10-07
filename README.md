@@ -175,7 +175,10 @@ dass für jede Datei genau ein Profil passt; `1` bedeutet mindestens einen
 fehlenden/mehrdeutigen Treffer oder Dateifehler. Die CSV ist UTF-8 mit BOM und
 Semikolon als Trennzeichen. Zusätzlich entsteht daneben eine Logdatei mit dem
 gleichen Format wie bei der Konvertierung, standardmäßig `<csv-name>.preflight.log`.
-Mit `--log-level DEBUG` werden auch die Einzelgründe jeder Profilprüfung protokolliert.
+Mit `--log-level DEBUG` werden auch die Einzelgründe jeder Profilprüfung sowie
+bei Dateifehlern der vollständige Stacktrace protokolliert. Die Abschlussmeldung
+weist eindeutig erkannte Dateien, Dateien ohne Profil, mehrdeutige Treffer,
+Eingabefehler und unerwartete Fehler getrennt aus.
 
 ### Verantwortliche vom Deckblatt auflisten
 
@@ -315,12 +318,14 @@ Bei Fehlern wird aufgeräumt; es bleibt kein unvollständiger Testfallordner zur
 Für jedes Dokument werden alle Profile aus `config/profiles/*.json` geprüft –
 **nie** anhand des Dateinamens. Ein Profil passt genau dann, wenn
 
-1. alle `required_markers` im normalisierten Dokumenttext vorkommen,
+1. alle `required_markers` im normalisierten Dokumenttext vorkommen und
 2. eine Tabelle alle `step_table.required_columns` abdeckt (Kopfzeile in den
-   ersten drei Tabellenzeilen; Spaltennamen-Varianten über `field_aliases`),
-3. mindestens eine fachlich befüllte Schrittzeile vorhanden ist (`action` oder
-  `expected_result` enthält Text oder Bild; bei `gh_standard_v1` zählt auch die
-  Profilspalte `Eingabedaten / besondere Angaben` als Action-Inhalt).
+   ersten drei Tabellenzeilen; Spaltennamen-Varianten über `field_aliases`).
+
+Befüllte Schrittzeilen sind optional. Eine Schrittzeile gilt als fachlich befüllt,
+wenn `action` oder `expected_result` Text oder Bild enthält (bei `gh_standard_v1`
+zählt auch die Profilspalte `Eingabedaten / besondere Angaben` als Action-Inhalt).
+Enthält ein Dokument keine Testschritte, fehlt das Feld `steps` im Ziel-JSON.
 
 | Ergebnis | Verhalten |
 |---|---|
@@ -539,7 +544,7 @@ nur bei Erfolg befüllt.
 | `1` | mindestens eine Datei fehlgeschlagen |
 | `2` | globaler Fehler vor der Verarbeitung: Output-Ordner nicht leer, Eingabeordner fehlt, Profil/Schema ungültig, unbekanntes `--profile`; ebenso ungültige CLI-Parameter |
 
-Fehlercodes je Datei: `input_file_error`, `doc_conversion_failed`,
+Fehlercodes je Datei: `input_file_error`, `docx_content_error`, `doc_conversion_failed`,
 `no_matching_profile`, `ambiguous_profile`,
 `required_field_missing`, `schema_validation_failed`, `missing_image_reference`,
 `output_name_conflict`, `export_failed`, `unexpected_error`.
@@ -547,8 +552,8 @@ Fehlercodes je Datei: `input_file_error`, `doc_conversion_failed`,
 Fehler einer Datei brechen den Batch nicht ab. Mit `--fail-fast` werden die
 restlichen Dateien als `skipped` gemeldet.
 
-Pflichtregeln: `summary` (= Feld `Testfallname`) nicht leer, mindestens ein
-Schritt. Eine Tabellenzeile wird nur übernommen, wenn `action` oder
+Pflichtregeln: `summary` (= Feld `Testfallname`) nicht leer. Testschritte sind
+optional; ohne Testschritte wird `steps` nicht geschrieben. Eine Tabellenzeile wird nur übernommen, wenn `action` oder
 `expected_result` einschließlich zugeordneter Bilder Inhalt hat. Fehlt eine
 Seite, wird sie als `-` ausgegeben; sind beide leer, wird die Zeile ignoriert.
 Leeres `system` wird zu `nicht definiert`. Alle Pflichtfeldfehler eines

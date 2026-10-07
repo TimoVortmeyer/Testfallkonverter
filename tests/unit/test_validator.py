@@ -46,6 +46,12 @@ def test_gueltiges_payload_besteht_schema() -> None:
     assert check_schema(_payload(), load_schema(SCHEMA_PATH)) == []
 
 
+def test_payload_ohne_steps_ist_gueltig(screenshots: Path) -> None:
+    payload = _payload()
+    del payload["steps"]
+    validate_payload(payload, load_schema(SCHEMA_PATH), screenshots)
+
+
 @pytest.mark.parametrize(
     ("mutate", "expected_field"),
     [

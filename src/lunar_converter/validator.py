@@ -44,9 +44,9 @@ def check_required_fields(payload: Mapping[str, Any]) -> list[Issue]:
         issues.append(
             Issue(code="required_field_missing", field="summary", message="Testfallname fehlt oder ist leer (Summary).")
         )
-    steps = payload.get("steps")
-    if not isinstance(steps, list) or not steps:
-        issues.append(Issue(code="required_field_missing", field="steps", message="Es wurde kein Testschritt erkannt."))
+    steps = payload.get("steps", [])
+    if not isinstance(steps, list):
+        issues.append(Issue(code="required_field_missing", field="steps", message="Die Testschritte sind ungültig."))
         return issues
     for index, step in enumerate(steps):
         if not isinstance(step, Mapping):

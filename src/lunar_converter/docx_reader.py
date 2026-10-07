@@ -28,15 +28,16 @@ def read_docx(path: Path) -> SourceDocument:
     traversal = BodyTraversal(
         resolve_image=lambda rel_id, linked: _resolve_image(document, rel_id, linked),
         is_heading_style=_heading_style_classifier(document),
-        numbering=document.part.numbering_part.element,
+        numbering=_numbering_element(document),
         styles=document.styles.element,
     )
     try:
         blocks = traversal.traverse(document.element.body)
     except Exception as exc:
         raise InputFileError(
-            "Der Dokumentinhalt konnte nicht ausgewertet werden.",
+            "Der Dokumentinhalt konnte nicht ausgewertet werden (Phase: DOCX-Auswertung, Dokumentkörper).",
             details=f"{type(exc).__name__}: {exc}",
+            code="docx_content_error",
         ) from exc
     return SourceDocument(
         source_path=path,
@@ -45,6 +46,14 @@ def read_docx(path: Path) -> SourceDocument:
         ignored_header_footer_images=_count_header_footer_images(document),
         warnings=traversal.warnings,
     )
+
+
+def _numbering_element(document: DocxDocument) -> Any | None:
+    # python-docx kann einen fehlenden Nummerierungsteil nicht anlegen (NotImplementedError).
+    try:
+        return document.part.part_related_by(RT.NUMBERING).element
+    except KeyError:
+        return None
 
 
 def _open_document(path: Path) -> DocxDocument:

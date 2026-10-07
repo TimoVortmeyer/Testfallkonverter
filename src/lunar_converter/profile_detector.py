@@ -1,9 +1,10 @@
 """Automatische Profilerkennung anhand des Dokumentinhalts (nie anhand des Dateinamens).
 
 Ein Profil passt genau dann, wenn
-1. alle ``required_markers`` im normalisierten Dokumenttext vorkommen,
-2. eine Tabelle alle Pflichtspalten der Schritttabelle abdeckt und
-3. mindestens eine fachlich befüllte Schrittzeile vorhanden ist.
+1. alle ``required_markers`` im normalisierten Dokumenttext vorkommen und
+2. eine Tabelle alle Pflichtspalten der Schritttabelle abdeckt.
+
+Befüllte Schrittzeilen sind optional.
 """
 
 from __future__ import annotations
@@ -60,10 +61,10 @@ def check_profile(document: SourceDocument, profile: ProfileDefinition) -> Profi
     reasons.append(f"Schritttabelle gefunden (Tabelle {table_numbers}).")
     data_rows = sum(count_data_rows(layout) for layout in layouts)
     if data_rows == 0:
-        reasons.append("Keine fachlich befüllte Schrittzeile vorhanden.")
+        reasons.append("Keine fachlich befüllte Schrittzeile vorhanden (Testschritte sind optional).")
     else:
         reasons.append(f"{data_rows} fachlich befüllte Schrittzeile(n) gefunden.")
-    return ProfileCheckResult(profile=profile.id, matched=not missing_markers and data_rows > 0, reasons=reasons)
+    return ProfileCheckResult(profile=profile.id, matched=not missing_markers, reasons=reasons)
 
 
 def detect_profile(document: SourceDocument, profiles: Sequence[ProfileDefinition]) -> DetectionResult:
