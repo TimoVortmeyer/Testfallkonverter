@@ -7,6 +7,7 @@ import re
 import shutil
 import stat
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -18,6 +19,7 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _WINDOWS_RESERVED = frozenset(
     {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 )
+_RENAME_RETRY_DELAYS: tuple[float, ...] = (0.2, 0.5, 1.0, 2.0, 3.0)
 
 
 def sanitize_folder_name(stem: str) -> str:
@@ -102,6 +104,17 @@ def _remove_readonly(function, path, exc_info) -> None:
     function(path)
 
 
+def _rename_with_retry(source: Path, target: Path) -> None:
+    # Virenscanner, Indexdienst oder Explorer halten frisch geschriebene Dateien unter Windows kurz gesperrt.
+    for delay in _RENAME_RETRY_DELAYS:
+        try:
+            os.rename(source, target)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    os.rename(source, target)
+
+
 def publish_directory(staged_dir: Path, final_dir: Path) -> None:
     """Überträgt einen vollständig vorbereiteten Testfallordner atomar in den Output-Ordner.
 
@@ -114,7 +127,7 @@ def publish_directory(staged_dir: Path, final_dir: Path) -> None:
     staging = final_dir.parent / f".{final_dir.name}.tmp-{uuid.uuid4().hex[:8]}"
     try:
         shutil.copytree(staged_dir, staging)
-        os.rename(staging, final_dir)
+        _rename_with_retry(staging, final_dir)
     except OSError as exc:
         raise ExportError(f"Testfallordner '{final_dir.name}' konnte nicht geschrieben werden.", details=str(exc)) from exc
     finally:

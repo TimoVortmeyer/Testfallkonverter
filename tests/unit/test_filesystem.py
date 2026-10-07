@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from lunar_converter.exceptions import OutputDirectoryError
+from lunar_converter import filesystem
+from lunar_converter.exceptions import ExportError, OutputDirectoryError
 from lunar_converter.filesystem import prepare_output_directory, publish_directory, sanitize_folder_name
 from lunar_converter.source_discovery import discover_source_files, relative_display_path
 
@@ -21,6 +22,51 @@ from lunar_converter.source_discovery import discover_source_files, relative_dis
 )
 def test_sanitize_folder_name(stem: str, expected: str) -> None:
     assert sanitize_folder_name(stem) == expected
+
+
+def _staged(tmp_path: Path) -> Path:
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "testcase.json").write_text("{}", encoding="utf-8")
+    return staged
+
+
+def test_publish_directory_wiederholt_umbenennen_bei_kurzer_sperre(tmp_path: Path, monkeypatch) -> None:
+    real_rename = filesystem.os.rename
+    calls = {"count": 0}
+
+    def flaky_rename(source, target):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise PermissionError(5, "Zugriff verweigert")
+        real_rename(source, target)
+
+    monkeypatch.setattr(filesystem.os, "rename", flaky_rename)
+    monkeypatch.setattr(filesystem.time, "sleep", lambda _: None)
+    final = tmp_path / "out" / "fall"
+    final.parent.mkdir()
+
+    publish_directory(_staged(tmp_path), final)
+
+    assert (final / "testcase.json").is_file()
+    assert calls["count"] == 3
+    assert [p.name for p in final.parent.iterdir()] == ["fall"]
+
+
+def test_publish_directory_meldet_dauerhafte_sperre_und_raeumt_auf(tmp_path: Path, monkeypatch) -> None:
+    def locked(source, target):
+        raise PermissionError(5, "Zugriff verweigert")
+
+    monkeypatch.setattr(filesystem.os, "rename", locked)
+    monkeypatch.setattr(filesystem.time, "sleep", lambda _: None)
+    final = tmp_path / "out" / "fall"
+    final.parent.mkdir()
+
+    with pytest.raises(ExportError) as info:
+        publish_directory(_staged(tmp_path), final)
+
+    assert info.value.code == "export_failed"
+    assert list(final.parent.iterdir()) == []
 
 
 def test_prepare_output_directory_legt_an_und_bricht_bei_abgelehnter_loeschung_ab(tmp_path: Path, monkeypatch) -> None:
