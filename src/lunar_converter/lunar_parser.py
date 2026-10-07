@@ -144,10 +144,12 @@ class _TestCaseParser:
                 name_lines = self._name_value(paragraphs, index)
                 if name_lines is None:
                     continue
-                names.append(self._plain_text(name_lines, reason=_NAME_IMAGE_REASON, single_line=True))
                 if cover is None:
                     process_path, title = _cover_header(paragraphs[:index])
                     cover = _Cover(name_lines=name_lines, process_path=process_path, title=title, table=table)
+                # Treffer in anderen Tabellen sind z. B. Verweise auf Vorgängertestfälle, keine konkurrierenden Namen.
+                if table is cover.table:
+                    names.append(self._plain_text(name_lines, reason=_NAME_IMAGE_REASON, single_line=True))
         if cover is not None and len(set(names)) > 1:
             self._warnings.append(
                 Issue(

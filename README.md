@@ -295,7 +295,8 @@ Feld `Testfallname` (Profilalias `testfallname`, zum Beispiel `Testfall: <Name>`
 übernommen. Steht der Bezeichner allein in einer Tabellenzelle, wird der Wert der
 Nachbarzelle verwendet. Wird kein Name erkannt oder ist er leer, wird der
 Dateiname ohne Endung als `summary` verwendet (Reportwarnung
-`testcase_name_from_filename`). Mehrere unterschiedliche Namensfelder erzeugen
+`testcase_name_from_filename`). Mehrere unterschiedliche Namensfelder in derselben
+Deckblatt-Tabelle erzeugen
 die Reportwarnung `ambiguous_testcase_name`; die Datei wird dann mit
 `required_field_missing` abgelehnt.
 Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen)

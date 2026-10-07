@@ -48,6 +48,21 @@ def test_mehrere_unterschiedliche_namensfelder_werden_abgelehnt(
     assert any(warning["code"] == "ambiguous_testcase_name" for warning in entry["warnings"])
 
 
+def test_testfallverweis_in_spaeterer_tabelle_ist_kein_zweiter_name(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
+    path = build_lunar_docx(input_dir / "verweis.docx")
+    document = Document(str(path))
+    document.tables[1].cell(0, 1).add_paragraph("Testfall\t - durchführen - TF_Vorgaenger_001")
+    document.save(str(path))
+
+    assert run_convert() == 0
+
+    entry = file_entry(load_report(output_dir), "verweis.docx")
+    assert not any(warning["code"] == "ambiguous_testcase_name" for warning in entry["warnings"])
+    assert load_testcase(output_dir, "verweis")["summary"] == "TF_Beispiel_001"
+
+
 def test_legacy_formcheckbox_wird_vor_textverarbeitung_gerendert(
     input_dir: Path, output_dir: Path, run_convert: RunConvert
 ) -> None:
