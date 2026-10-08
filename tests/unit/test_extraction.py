@@ -5,10 +5,14 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import pytest
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import parse_xml
+from docx.shared import Inches, RGBColor
 
 from lunar_converter.docx_reader import read_docx
+from lunar_converter.exceptions import InputFileError
 from lunar_converter.cli import main
 from lunar_converter.lunar_parser import parse_test_case
 from lunar_converter.models import ProfileDefinition, SourceTable
@@ -144,7 +148,7 @@ def test_parser_felder_und_schritte(tmp_path: Path) -> None:
     document = read_docx(path)
     test_case = parse_test_case(document, _standard_profile())
 
-    assert test_case.name == "TF_Beispiel_001"
+    assert test_case.name == "TFB_Beispiel_001"
     assert test_case.responsible_names == ["Max Mustermann"]
     assert test_case.process_path == [
         "03.02 Einkaufsverwaltung",
@@ -253,8 +257,14 @@ def test_wingdings_word_listen_einrueckung_und_warnung(tmp_path: Path) -> None:
     action_cell.add_paragraph("Wertartikel", style="List Bullet")
     action_cell.add_paragraph("Buchungskreis", style="List Bullet 2")
     action_cell.add_paragraph("\t\tBetrieb")
+    indented = action_cell.add_paragraph("Absatz mit Einzug")
+    indented.paragraph_format.left_indent = Inches(0.5)
+    action_cell.add_paragraph("Nummeriert", style="List Number")
+    action_cell.add_paragraph("Unternummeriert", style="List Number 2")
     arrow = action_cell.add_paragraph().add_run("\uf0d8")
     arrow.font.name = "Wingdings"
+    expected_arrow = action_cell.add_paragraph().add_run("\uf0f0")
+    expected_arrow.font.name = "Wingdings"
     unknown = action_cell.add_paragraph().add_run("\uf0b0")
     unknown.font.name = "Wingdings"
     document.save(str(path))
@@ -266,10 +276,258 @@ def test_wingdings_word_listen_einrueckung_und_warnung(tmp_path: Path) -> None:
     assert "→" in payload["description"]
     action = payload["steps"][0]["action"]
     assert "Normaler Text bleibt." in action
-    assert "• Wertartikel" in action
-    assert "↳ • Buchungskreis" in action
-    assert "↳ ↳ Betrieb" in action
+    assert "* Wertartikel" in action
+    assert "** Buchungskreis" in action
+    assert "Betrieb" in action and "↳" not in action
+    assert "Absatz mit Einzug" in action and "↳" not in action
+    assert "↳" not in action
+    assert "# Nummeriert" in action
+    assert "## Unternummeriert" in action
     assert "→" in action
-    assert "[Wingdings U+F0B0]" in action
+    assert "[Wingdings" not in action
+    assert action.count("→") >= 2
     warning = next(issue for issue in source.warnings if issue.code == "unsupported_wingdings_glyph")
     assert warning.message.startswith("Tabelle ") and "U+F0B0" in warning.message
+
+
+def test_inline_formatierung_bleibt_in_fachtext_erhalten_und_labels_bleiben_plain(tmp_path: Path) -> None:
+    path = build_lunar_docx(tmp_path / "inline.docx")
+    document = Document(str(path))
+    info = next(table for table in document.tables if any(cell.text == "Kurzbeschreibung" for row in table.rows for cell in row.cells))
+    info.cell(1, 0).paragraphs[0].runs[0].bold = True
+    value = info.cell(1, 1).paragraphs[0]
+    value.clear()
+    value.add_run("Fett").bold = True
+    value.add_run(" kursiv").italic = True
+    value.add_run(" unterstrichen").underline = True
+    value.add_run("\tTabulator")
+    steps = next(table for table in document.tables if table.rows[0].cells[0].text == "Schritt-Nr.")
+    action = steps.cell(1, 2).paragraphs[0]
+    action.clear()
+    action.add_run("Fett").bold = True
+    action.add_run(" kursiv").italic = True
+    action.add_run(" unterstrichen").underline = True
+    action.add_run(" Platzhalter <Marktnummer>")
+    expected = steps.cell(1, 3).paragraphs[0]
+    expected.clear()
+    expected.add_run("Erwartet").bold = True
+    expected.add_run(" kursiv").italic = True
+    expected.add_run(" unterstrichen").underline = True
+    expected.add_run("\tweiter")
+    document.save(str(path))
+
+    source = read_docx(path)
+    test_case = parse_test_case(source, _standard_profile())
+    payload = XrayImportRenderer().render(test_case, assign_images(test_case, {}), path.stem)
+
+    assert "|Kurzbeschreibung|*Fett* _kursiv_ +unterstrichen+ Tabulator|" in payload["description"]
+    assert "*Kurzbeschreibung*" not in payload["description"]
+    assert payload["steps"][0]["action"] == "*Fett* _kursiv_ +unterstrichen+ Platzhalter <Marktnummer>"
+    assert payload["steps"][0]["expected_result"] == "*Erwartet* _kursiv_ +unterstrichen+ weiter"
+    assert payload["source_word_filename"] == "inline.docx"
+
+
+def test_nested_info_table_is_rejected_with_outer_cell_location(tmp_path: Path) -> None:
+    path = build_lunar_docx(tmp_path / "nested.docx")
+    document = Document(str(path))
+    info = next(table for table in document.tables if any(cell.text == "Kurzbeschreibung" for row in table.rows for cell in row.cells))
+    nested = info.cell(1, 1).add_table(rows=3, cols=2)
+    nested.cell(0, 0).text, nested.cell(0, 1).text = "Bereich:", "EDEKA"
+    nested.cell(0, 1).paragraphs[0].runs[0].bold = True
+    nested.cell(1, 0).text, nested.cell(1, 1).text = "Filiale", "1234"
+    nested.cell(2, 0).text, nested.cell(2, 1).text = "", ""
+    info.cell(2, 1).text = "<Sicherung>"
+    info.cell(2, 1).add_table(rows=1, cols=2)
+    steps = next(table for table in document.tables if table.rows[0].cells[0].text == "Schritt-Nr.")
+    steps.cell(1, 2).text = "Platzhalter <Marktnummer> im Fachtext"
+    document.save(str(path))
+
+    with pytest.raises(InputFileError) as raised:
+        read_docx(path)
+
+    assert raised.value.code == "nested_table_not_supported"
+    assert "Tabelle 2" in (raised.value.field or "")
+    assert "Zeile 2, Zelle 2" in (raised.value.field or "")
+    assert "Zeile 3, Zelle 2" in (raised.value.field or "")
+    assert "2 innere Tabelle(n)" in (raised.value.details or "")
+
+
+@pytest.mark.parametrize(
+    ("progid", "expected_error"),
+    [("Word.Document.12", True), ("Excel.Sheet.12", False)],
+)
+def test_embedded_word_document_is_rejected_but_other_ole_object_is_not(
+    tmp_path: Path, progid: str, expected_error: bool
+) -> None:
+    path = build_lunar_docx(tmp_path / "ole.docx")
+    document = Document(str(path))
+    steps = next(table for table in document.tables if table.rows[0].cells[0].text == "Schritt-Nr.")
+    paragraph = steps.cell(1, 2).paragraphs[0]
+    paragraph._p.append(
+        parse_xml(
+            '<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+            'xmlns:o="urn:schemas-microsoft-com:office:office" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<w:object><o:OLEObject Type="Embed" ProgID="'
+            f'{progid}'
+            '" r:id="rIdEmbedded"/></w:object></w:r>'
+        )
+    )
+    document.save(str(path))
+
+    if expected_error:
+        with pytest.raises(InputFileError) as raised:
+            read_docx(path)
+        assert raised.value.code == "embedded_word_document_not_processed"
+        assert "Tabelle 3, Zeile 2, Zelle 3" in (raised.value.field or "")
+        assert "Word.Document.12" in (raised.value.details or "")
+        assert "Eingebettetes Word-Dokument" in raised.value.message
+    else:
+        assert read_docx(path).blocks
+
+
+def test_bullets_in_info_cell_are_separate_jira_list_items(tmp_path: Path) -> None:
+    path = build_lunar_docx(tmp_path / "info_liste.docx")
+    document = Document(str(path))
+    info = next(table for table in document.tables if any(cell.text == "Kurzbeschreibung" for row in table.rows for cell in row.cells))
+    cell = info.cell(1, 1)
+    cell.paragraphs[0].text = "Eintrag 1"
+    cell.paragraphs[0].style = "List Bullet"
+    for text in ("Eintrag 2", "Eintrag 3", "Eintrag 4"):
+        cell.add_paragraph(text, style="List Bullet")
+    document.save(str(path))
+
+    test_case = parse_test_case(read_docx(path), _standard_profile())
+    payload = XrayImportRenderer().render(test_case, assign_images(test_case, {}), path.stem)
+
+    assert "|Kurzbeschreibung|* Eintrag 1\n* Eintrag 2\n* Eintrag 3\n* Eintrag 4|" in payload["description"]
+    assert " \\\\ * Eintrag" not in payload["description"]
+
+
+def test_consecutive_manual_bullet_paragraphs_stay_separate(tmp_path: Path) -> None:
+    path = build_lunar_docx(tmp_path / "manual_liste.docx")
+    document = Document(str(path))
+    info = next(table for table in document.tables if any(cell.text == "Kurzbeschreibung" for row in table.rows for cell in row.cells))
+    cell = info.cell(1, 1)
+    cell.paragraphs[0].text = "- Stammdaten 1"
+    for text in ("- Stammdaten 2", "- Stammdaten 3", "- Stammdaten 4"):
+        cell.add_paragraph(text)
+    document.save(str(path))
+
+    case = parse_test_case(read_docx(path), _standard_profile())
+    rendered = XrayImportRenderer().render(case, assign_images(case, {}), path.stem)["description"]
+    assert all(f"- Stammdaten {index}" in rendered for index in range(1, 5))
+    assert rendered.count("- Stammdaten") == 4
+    assert " \\\\ - Stammdaten" not in rendered
+
+
+def test_bracketed_cover_process_segments_are_normalized_before_path_detection(tmp_path: Path) -> None:
+    path = build_lunar_docx(
+        tmp_path / "prozess.docx",
+        DocSpec(
+            process_lines=(
+                "<06.04. Verkaufsabwicklung>",
+                "<06.04.003 GH Kundenauftragsabwicklung >",
+                "06.04.003 GH Tabak Rückverfolgbarkeit",
+                "<18-00144-004 Tabak Rückverfolgbarkeit>",
+            )
+        ),
+    )
+
+    case = parse_test_case(read_docx(path), _standard_profile())
+    payload = XrayImportRenderer().render(case, assign_images(case, {}), path.stem)
+
+    assert case.process_path == [
+        "06.04. Verkaufsabwicklung",
+        "06.04.003 GH Kundenauftragsabwicklung",
+        "06.04.003 GH Tabak Rückverfolgbarkeit",
+        "18-00144-004 Tabak Rückverfolgbarkeit",
+    ]
+    assert payload["custom_fields"]["customfield_15909"] == "/".join(case.process_path)
+
+
+def test_bracketed_process_line_with_trailing_period_and_inline_testcase_label(tmp_path: Path) -> None:
+    path = build_lunar_docx(
+        tmp_path / "inline_cover.docx",
+        DocSpec(process_lines=(), title_lines=()),
+    )
+    document = Document(str(path))
+    cover = document.tables[0].cell(1, 0)
+    cover.text = "<06.04. Verkaufsabwicklung>\n<06.04.003 GH Kundenauftragsabwicklung>\n<18-00144-004 Tabak Rückverfolgbarkeit> Testfall: TFB_1"
+    document.save(str(path))
+
+    case = parse_test_case(read_docx(path), _standard_profile())
+
+    assert case.name == "TFB_1"
+    assert case.process_path == [
+        "06.04. Verkaufsabwicklung",
+        "06.04.003 GH Kundenauftragsabwicklung",
+        "18-00144-004 Tabak Rückverfolgbarkeit",
+    ]
+
+
+def test_word_color_is_not_guessed_as_jira_markup_and_is_warned(tmp_path: Path) -> None:
+    path = build_lunar_docx(tmp_path / "farbe.docx")
+    document = Document(str(path))
+    info = next(table for table in document.tables if any(cell.text == "Kurzbeschreibung" for row in table.rows for cell in row.cells))
+    run = info.cell(1, 1).paragraphs[0].runs[0]
+    run.font.color.rgb = RGBColor(0xFF, 0, 0)
+    steps = next(table for table in document.tables if table.rows[0].cells[0].text == "Schritt-Nr.")
+    action_paragraph = steps.cell(1, 2).paragraphs[0]
+    action_paragraph.runs[0].font.color.rgb = RGBColor(0xFF, 0, 0)
+    action_paragraph.add_run(" blau").font.color.rgb = RGBColor(0, 0, 0xFF)
+    expected_style = document.styles.add_style("ExpectedRed", WD_STYLE_TYPE.CHARACTER)
+    expected_style.font.color.rgb = RGBColor(0xFF, 0, 0)
+    steps.cell(1, 3).paragraphs[0].runs[0].style = expected_style
+    document.save(str(path))
+
+    source = read_docx(path)
+    case = parse_test_case(source, _standard_profile())
+    payload = XrayImportRenderer().render(case, assign_images(case, {}), path.stem)
+
+    assert "Es wird ein Beispiel geprüft." in payload["description"]
+    assert "Transaktion aufrufen." in payload["steps"][0]["action"]
+    assert "blau" in payload["steps"][0]["action"]
+    assert "Maske wird angezeigt." in payload["steps"][0]["expected_result"]
+    assert "{color" not in payload["description"] + payload["steps"][0]["action"]
+    color_warnings = [issue for issue in source.warnings if issue.code == "unsupported_text_color"]
+    assert len(color_warnings) >= 4
+    assert any("ff0000" in issue.message for issue in color_warnings)
+    assert any("0000ff" in issue.message for issue in color_warnings)
+
+
+def test_tracked_insertions_are_kept_and_deletions_ignored(tmp_path: Path) -> None:
+    path = build_lunar_docx(tmp_path / "revision.docx")
+    document = Document(str(path))
+    step_table = next(table for table in document.tables if table.rows[0].cells[0].text == "Schritt-Nr.")
+    paragraph = step_table.cell(1, 3).paragraphs[0]
+    paragraph.clear()
+    paragraph._p.append(parse_xml('<w:del xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:delText>alter Text</w:delText></w:r></w:del>'))
+    paragraph._p.append(parse_xml('<w:ins xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>sichtbarer aktueller Text</w:t></w:r></w:ins>'))
+    document.save(str(path))
+
+    test_case = parse_test_case(read_docx(path), _standard_profile())
+    rendered = XrayImportRenderer().render(test_case, assign_images(test_case, {}), path.stem)["steps"][0]["expected_result"]
+
+    assert "sichtbarer aktueller Text" in rendered
+    assert "alter Text" not in rendered
+
+
+def test_word_comment_markers_are_not_imported_as_fachtext(tmp_path: Path) -> None:
+    path = build_lunar_docx(tmp_path / "comment.docx")
+    document = Document(str(path))
+    step_table = next(table for table in document.tables if table.rows[0].cells[0].text == "Schritt-Nr.")
+    paragraph = step_table.cell(1, 2).paragraphs[0]
+    paragraph.clear()
+    paragraph.add_run("Sichtbarer Text ")
+    paragraph._p.append(parse_xml('<w:commentRangeStart xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:id="4"/>'))
+    paragraph.add_run("mit Kommentar")
+    paragraph._p.append(parse_xml('<w:commentRangeEnd xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:id="4"/>'))
+    paragraph._p.append(parse_xml('<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:commentReference w:id="4"/></w:r>'))
+    document.save(str(path))
+
+    test_case = parse_test_case(read_docx(path), _standard_profile())
+    action = XrayImportRenderer().render(test_case, assign_images(test_case, {}), path.stem)["steps"][0]["action"]
+
+    assert action == "Sichtbarer Text mit Kommentar"
+    assert "commentReference" not in action

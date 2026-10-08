@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .image_assignment import ImageAssignmentResult
-from .semantic_model import CheckboxMarker, InfoTable, RichText, TestCase, TestStep
+from .semantic_model import CheckboxMarker, InfoTable, RichText, StyledText, TestCase, TestStep
 from .text_normalizer import clean_multiline
 
 EMPTY_EXPECTED_RESULT = "-"
@@ -47,6 +47,21 @@ def render_rich_text(rich: RichText, anchors: Mapping[int, str], *, render_check
                 if needs_gap and item[:1].isalnum() and buffer and not buffer[-1].isspace():
                     buffer += " "
                 buffer += item
+                needs_gap = False
+                continue
+            if isinstance(item, StyledText):
+                raw_text = item.text
+                leading = raw_text[: len(raw_text) - len(raw_text.lstrip())]
+                trailing = raw_text[len(raw_text.rstrip()):]
+                core = raw_text.strip()
+                text = escape_jira_emoticons(core)
+                if item.underline:
+                    text = f"+{text}+"
+                if item.italic:
+                    text = f"_{text}_"
+                if item.bold:
+                    text = f"*{text}*"
+                buffer += leading + text + trailing
                 needs_gap = False
                 continue
             if isinstance(item, CheckboxMarker):
@@ -84,7 +99,12 @@ def render_wiki_table(table: InfoTable, anchors: Mapping[int, str]) -> str:
 def _wiki_cell(text: str) -> str:
     if not text:
         return " "
-    return " \\\\ ".join(line.replace("|", "\\|") for line in text.split("\n") if line)
+    lines = [line.replace("|", "\\|") for line in text.split("\n") if line]
+    if any(line.lstrip().startswith(("*", "#")) for line in lines):
+        return "\n".join(lines)
+    if len(lines) > 1 and all(re.match(r"^\s*[-–•▪]\s+\S", line) for line in lines):
+        return "\n".join(lines)
+    return " \\\\ ".join(lines)
 
 
 class XrayImportRenderer:
@@ -99,6 +119,7 @@ class XrayImportRenderer:
             "components": self.render_components(test_case),
             "custom_fields": self.render_custom_fields(test_case),
             "screenshots": images.global_screenshots,
+            "source_word_filename": test_case.source_word_filename or test_case.source_file.name,
         }
         if test_case.steps:
             payload["steps"] = [self.render_step(step, anchors, images.step_attachments(step.index)) for step in test_case.steps]

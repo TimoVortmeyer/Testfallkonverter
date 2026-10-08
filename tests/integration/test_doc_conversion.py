@@ -51,7 +51,7 @@ def test_doc_wird_mit_word_umgewandelt(
     monkeypatch: pytest.MonkeyPatch,
     capsys,
 ) -> None:
-    template = build_lunar_docx(tmp_path / "vorlage.docx", DocSpec(name="TF_aus_DOC"))
+    template = build_lunar_docx(tmp_path / "vorlage.docx", DocSpec(name="TFB_aus_DOC"))
     (input_dir / "Alt Format ä.doc").write_bytes(b"\xd0\xcf\x11\xe0 binaeres Word")
     calls: list[list[str]] = []
     monkeypatch.setattr(doc_converter.subprocess, "run", _fake_run_factory(template, calls))
@@ -64,7 +64,8 @@ def test_doc_wird_mit_word_umgewandelt(
     assert command[1:4] == ["-NoProfile", "-NonInteractive", "-File"]
     assert "ExecutionPolicy" not in " ".join(command)
     assert Path(command[4]).name == "convert_doc_to_docx.ps1" and Path(command[4]).is_file()
-    assert load_testcase(output_dir, "Alt_Format_ä")["summary"] == "TF_aus_DOC"
+    assert load_testcase(output_dir, "Alt_Format_ä")["summary"] == "TFB_aus_DOC"
+    assert load_testcase(output_dir, "Alt_Format_ä")["source_word_filename"] == "Alt Format ä.doc"
     assert sorted(p.name for p in input_dir.iterdir()) == ["Alt Format ä.doc"]
 
 

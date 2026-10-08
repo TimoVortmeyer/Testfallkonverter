@@ -161,7 +161,18 @@ class _FileConverter:
                 self._convert(source, Path(temp), report, used_folder_names)
             report.status = "success"
         except LunarConverterError as exc:
-            self._fail(report, source, exc.to_issues())
+            issues = exc.to_issues()
+            if exc.code == "nested_table_not_supported":
+                issues = [
+                    Issue(
+                        code=issue.code,
+                        message=f"{self._label(source)}: {issue.message}",
+                        field=issue.field,
+                        details=issue.details,
+                    )
+                    for issue in issues
+                ]
+            self._fail(report, source, issues)
         except Exception as exc:  # Fehlerisolierung: unerwartete Fehler dürfen den Batch nicht abbrechen.
             issue = Issue(
                 code="unexpected_error",
@@ -208,14 +219,19 @@ class _FileConverter:
         log.info("Profil erkannt: %s (%s).", profile.id, profile.name)
 
         test_case = parse_test_case(document, profile)
-        if not test_case.name.strip() and not any(w.code == "ambiguous_testcase_name" for w in test_case.warnings):
+        test_case.source_word_filename = source.name
+        if (not test_case.name.strip() or not test_case.name.casefold().startswith("tfb")) and not any(
+            w.code == "ambiguous_testcase_name" for w in test_case.warnings
+        ):
+            previous_name = test_case.name
             test_case.name = source.stem
             test_case.warnings.append(
                 Issue(
                     code="testcase_name_from_filename",
-                    message=f"{source.name}: Kein Testfallname erkannt; der Dateiname '{source.stem}' wird als Testfallname verwendet.",
+                    message=f"{source.name}: Der Deckblattname {previous_name!r} fehlt oder beginnt nicht mit 'TFB'; der Dateiname '{source.stem}' wird als Testfallname verwendet.",
                 )
             )
+            log.warning("Testfallname aus Dateiname übernommen: %s", source.stem)
         self._apply_responsible_mapping(test_case, source)
         folder_name = sanitize_folder_name(source.stem)
         if folder_name.casefold() in used_folder_names:
@@ -312,7 +328,7 @@ class _FileConverter:
         report.errors.extend(issues)
         log: ContextLogger = context_logger(self._logger, self._label(source), report.detected_profile)
         for issue in issues:
-            lines = [f"Datei: {source}", f"Profil: {report.detected_profile or '-'}", f"Fehler: {issue.code}"]
+            lines = [f"Datei: {self._label(source)}", f"Profil: {report.detected_profile or '-'}", f"Fehler: {issue.code}"]
             if issue.field:
                 lines.append(f"Feld: {issue.field}")
             lines.append(f"Ursache: {issue.message}")

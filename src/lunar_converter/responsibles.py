@@ -17,7 +17,7 @@ from .models import SourceDocument, SourceParagraph, SourceTable
 from .progress import TerminalProgress
 from .source_discovery import discover_source_files, relative_display_path
 
-_LABEL = re.compile(r"^Verantwortliche(?:r|s)?(?:\s+Team)?\s*[:\t]\s*(.+)$", re.IGNORECASE)
+_LABEL = re.compile(r"Verantwortliche(?:r|s)?(?:\s+Team)?\s*[:\t]\s*(.+)$", re.IGNORECASE)
 _TESTCASE = re.compile(r"^Testfall\s*[:\t]", re.IGNORECASE)
 _PERSON = re.compile(r"^[^\W\d_]+(?:[-'][^\W\d_]+)?(?:\s+[^\W\d_]+(?:[-'][^\W\d_]+)?){1,3}$")
 _CONTACT = re.compile(r"^(?:T|Tel|Telefon|F|Fax)\s*[:.]|\b[^\s@]+@[^\s@]+\.[^\s@]+\b", re.IGNORECASE)
@@ -96,9 +96,9 @@ def cover_responsibles(document: SourceDocument) -> list[str]:
         for paragraph in paragraphs:
             for line in paragraph.text.splitlines():
                 text = line.strip()
-                match = _LABEL.match(text)
+                match = _LABEL.search(text)
                 if match:
-                    value = match.group(1).strip()
+                    value = _clean_cover_value(match.group(1))
                     if value and value not in found:
                         found.append(value)
                 if _TESTCASE.match(text):
@@ -111,6 +111,13 @@ def cover_responsibles(document: SourceDocument) -> list[str]:
         if name not in found:
             found.append(name)
     return found
+
+
+def _clean_cover_value(value: str) -> str:
+    cleaned = " ".join(value.split()).strip()
+    if len(cleaned) >= 2 and cleaned.startswith("<") and cleaned.endswith(">"):
+        return cleaned[1:-1].strip()
+    return cleaned
 
 
 def export_responsibles(input_dir: Path, csv_path: Path, logger: logging.Logger) -> tuple[int, int]:

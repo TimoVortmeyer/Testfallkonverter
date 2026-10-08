@@ -49,7 +49,16 @@ class CheckboxMarker:
     checked: bool
 
 
-Inline = str | ImageMarker | CheckboxMarker
+@dataclass(frozen=True)
+class StyledText:
+    text: str
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    color: str | None = None
+
+
+Inline = str | StyledText | ImageMarker | CheckboxMarker
 
 
 @dataclass
@@ -66,7 +75,10 @@ class RichText:
         return [item.image_id for line in self.lines for item in line if isinstance(item, ImageMarker)]
 
     def plain_text(self) -> str:
-        return "\n".join("".join(item for item in line if isinstance(item, str)) for line in self.lines)
+        return "\n".join(
+            "".join(item if isinstance(item, str) else item.text for item in line if isinstance(item, (str, StyledText)))
+            for line in self.lines
+        )
 
     def is_empty(self) -> bool:
         has_checkbox = any(isinstance(item, CheckboxMarker) for line in self.lines for item in line)
@@ -121,6 +133,7 @@ class TestCase:
     profile_id: str
     name: str
     steps: list[TestStep]
+    source_word_filename: str = ""
     labels: list[str] = field(default_factory=list)
     responsible_names: list[str] = field(default_factory=list)
     reporter_email: str | None = None

@@ -78,7 +78,16 @@ class ImageRef:
     external: bool = False
 
 
-Segment = str | ImageRef | CheckboxRef
+@dataclass(frozen=True)
+class TextRun:
+    text: str
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    color: str | None = None
+
+
+Segment = str | TextRun | ImageRef | CheckboxRef
 
 
 @dataclass
@@ -89,7 +98,7 @@ class SourceParagraph:
 
     @property
     def text(self) -> str:
-        return "".join(segment for segment in self.segments if isinstance(segment, str))
+        return "".join(segment if isinstance(segment, str) else segment.text for segment in self.segments if isinstance(segment, (str, TextRun)))
 
     @property
     def images(self) -> list[ImageRef]:
@@ -105,10 +114,13 @@ class SourceCell:
     grid_column: int
     grid_span: int = 1
     vmerge: VMerge | None = None
+    nested_tables: list[SourceTable] = field(default_factory=list)
 
     @property
     def text(self) -> str:
-        return "\n".join(paragraph.text for paragraph in self.paragraphs)
+        parts = [paragraph.text for paragraph in self.paragraphs]
+        parts.extend(cell.text for table in self.nested_tables for row in table.rows for cell in row.cells)
+        return "\n".join(part for part in parts if part)
 
     @property
     def images(self) -> list[ImageRef]:

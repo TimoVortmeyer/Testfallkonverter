@@ -60,7 +60,7 @@ def test_vorlage_ohne_datenzeile_wird_ohne_steps_exportiert(input_dir: Path, out
     assert any("Keine fachlich befüllte Schrittzeile" in reason for reason in standard["reasons"])
     testcase = load_testcase(output_dir, "vorlage")
     assert "steps" not in testcase
-    assert testcase["summary"] == "TF_Beispiel_001"
+    assert testcase["summary"] == "TFB_Beispiel_001"
 
 
 def test_fico_dokument_ohne_nummerierung_und_mit_name_in_tabellenzelle(
@@ -71,7 +71,7 @@ def test_fico_dokument_ohne_nummerierung_und_mit_name_in_tabellenzelle(
     info = document.add_table(rows=5, cols=2)
     for row, (label, value) in enumerate(
         [
-            ("Testfalltitel:", "TF_FICO_1"),
+            ("Testfalltitel:", "TFB_FICO_1"),
             ("Kurzbeschreibung:", "Kurz"),
             ("Testvoraussetzungen:", "Keine"),
             ("Erwartetes Ergebnis:", "OK"),
@@ -96,7 +96,7 @@ def test_fico_dokument_ohne_nummerierung_und_mit_name_in_tabellenzelle(
     entry = file_entry(load_report(output_dir), "fico.docx")
     assert entry["detected_profile"] == "fico_standard_v1"
     testcase = load_testcase(output_dir, "fico")
-    assert testcase["summary"] == "TF_FICO_1"
+    assert testcase["summary"] == "TFB_FICO_1"
     assert "steps" not in testcase
 
 

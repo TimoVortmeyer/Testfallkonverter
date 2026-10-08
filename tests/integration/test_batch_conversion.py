@@ -6,6 +6,7 @@ import csv
 from pathlib import Path
 
 from docx import Document
+from docx.oxml import parse_xml
 
 from lunar_converter.cli import main
 from lunar_converter import responsibles
@@ -36,7 +37,8 @@ def test_erfolgreiche_verarbeitung_einer_docx(
     assert "Gesamt ~" in terminal and "Rest ~" in terminal
 
     testcase = load_testcase(output_dir, "TFB_03.03.004_EH_012_MDE_Direktbestellung")
-    assert testcase["summary"] == "TF_Beispiel_001"
+    assert testcase["summary"] == "TFB_Beispiel_001"
+    assert testcase["source_word_filename"] == "TFB_03.03.004_EH_012_MDE_Direktbestellung.docx"
     assert testcase["description"] == (
         "h1. Prüfung der Beispielkonditionen\n\n"
         "|Fachbereich|Finanzen|\n"
@@ -133,7 +135,7 @@ def test_poc_beispiel_wird_weiterhin_verarbeitet(input_dir: Path, output_dir: Pa
     assert run_convert() == 0
 
     testcase = load_testcase(output_dir, "sample")
-    assert testcase["summary"] == "Beispiel Testfall"
+    assert testcase["summary"] == "sample"
     assert testcase["labels"] == []
     # Ohne Deckblatt-Prozesszeilen und ohne Tabelle vor dem Testablauf bleibt die Description leer.
     assert testcase["description"] == ""
@@ -192,6 +194,54 @@ def test_fehler_einer_datei_bricht_batch_nicht_ab(input_dir: Path, output_dir: P
     assert file_entry(report, "b_ok.docx")["status"] == "success"
 
 
+def test_nested_table_wird_abgelehnt_und_batch_verarbeitet_gueltige_datei_weiter(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
+    nested_path = build_lunar_docx(input_dir / "verschachtelt.docx")
+    document = Document(str(nested_path))
+    info = next(table for table in document.tables if any(cell.text == "Kurzbeschreibung" for row in table.rows for cell in row.cells))
+    info.cell(1, 1).add_table(rows=1, cols=2)
+    document.save(str(nested_path))
+    build_lunar_docx(input_dir / "gueltig.docx", DocSpec(name="TFB_Gueltig"))
+
+    assert run_convert() == 1
+
+    report = load_report(output_dir)
+    rejected = file_entry(report, "verschachtelt.docx")
+    assert error_codes(rejected) == ["nested_table_not_supported"]
+    assert "verschachtelt.docx" in rejected["errors"][0]["message"]
+    assert "Tabelle 2" in rejected["errors"][0]["field"]
+    assert final_entries(output_dir) == ["gueltig"]
+
+
+def test_embedded_word_object_wird_abgelehnt_und_batch_laueft_weiter(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
+    embedded_path = build_lunar_docx(input_dir / "mit_word_objekt.docx")
+    document = Document(str(embedded_path))
+    step_table = next(table for table in document.tables if table.rows[0].cells[0].text == "Schritt-Nr.")
+    paragraph = step_table.cell(1, 2).paragraphs[0]
+    paragraph._p.append(
+        parse_xml(
+            '<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+            'xmlns:o="urn:schemas-microsoft-com:office:office" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<w:object><o:OLEObject Type="Embed" ProgID="Word.Document.12" r:id="rIdEmbedded"/>'
+            '</w:object></w:r>'
+        )
+    )
+    document.save(str(embedded_path))
+    build_lunar_docx(input_dir / "gueltig.docx", DocSpec(name="TFB_Gueltig"))
+
+    assert run_convert() == 1
+
+    report = load_report(output_dir)
+    rejected = file_entry(report, "mit_word_objekt.docx")
+    assert error_codes(rejected) == ["embedded_word_document_not_processed"]
+    assert "Tabelle 3, Zeile 2, Zelle 3" in rejected["errors"][0]["field"]
+    assert final_entries(output_dir) == ["gueltig"]
+
+
 def test_fail_fast_ueberspringt_restliche_dateien(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
     (input_dir / "a_defekt.docx").write_bytes(b"kein zip")
     build_lunar_docx(input_dir / "b_ok.docx")
@@ -214,9 +264,9 @@ def test_bei_fehler_kein_finaler_testfallordner(input_dir: Path, output_dir: Pat
 
 
 def test_unterordner_werden_verarbeitet_output_bleibt_flach(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:
-    build_lunar_docx(input_dir / "Bereich A" / "Fall_1.docx", DocSpec(name="TF_A1"))
-    build_lunar_docx(input_dir / "Bereich B" / "Tief" / "Fall_2.docx", DocSpec(name="TF_B2"))
-    build_lunar_docx(input_dir / "Bereich B" / "Fall_1.docx", DocSpec(name="TF_B1"))
+    build_lunar_docx(input_dir / "Bereich A" / "Fall_1.docx", DocSpec(name="TFB_A1"))
+    build_lunar_docx(input_dir / "Bereich B" / "Tief" / "Fall_2.docx", DocSpec(name="TFB_B2"))
+    build_lunar_docx(input_dir / "Bereich B" / "Fall_1.docx", DocSpec(name="TFB_B1"))
 
     assert run_convert() == 1
 
@@ -227,7 +277,7 @@ def test_unterordner_werden_verarbeitet_output_bleibt_flach(input_dir: Path, out
         "Bereich B/Tief/Fall_2.docx",
     ]
     assert final_entries(output_dir) == ["Fall_1", "Fall_2"]
-    assert load_testcase(output_dir, "Fall_1")["summary"] == "TF_A1"
+    assert load_testcase(output_dir, "Fall_1")["summary"] == "TFB_A1"
     conflict = report["files"][1]
     assert error_codes(conflict) == ["output_name_conflict"]
     assert "Bereich A/Fall_1.docx" in conflict["errors"][0]["message"]
@@ -331,7 +381,7 @@ def test_summary_faellt_bei_fehlendem_dokumentnamen_auf_dateinamen_zurueck(
     assert run_convert() == 0
 
     assert load_testcase(output_dir, "TFB_Ohne_Namen")["summary"] == "TFB_Ohne Namen"
-    assert "Kein Testfallname erkannt" in (output_dir / "conversion.log").read_text(encoding="utf-8")
+    assert "testcase_name_from_filename" in (output_dir / "conversion-report.json").read_text(encoding="utf-8")
 
 
 def test_ordnername_konflikt_wird_erkannt(input_dir: Path, output_dir: Path, run_convert: RunConvert) -> None:

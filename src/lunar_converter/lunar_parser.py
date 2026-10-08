@@ -21,7 +21,7 @@ import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
-from .models import CheckboxRef, ImageRef, Issue, ProfileDefinition, Segment, SourceCell, SourceDocument, SourceParagraph, SourceRow, SourceTable
+from .models import CheckboxRef, ImageRef, Issue, ProfileDefinition, Segment, SourceCell, SourceDocument, SourceParagraph, SourceRow, SourceTable, TextRun
 from .responsibles import cover_responsibles
 from .semantic_model import (
     STEP_ACTION_KEY,
@@ -38,6 +38,7 @@ from .semantic_model import (
     RichText,
     TestCase,
     TestStep,
+    StyledText,
     UnassignedImage,
 )
 from .step_table import StepTableLayout, classify_row, find_step_tables
@@ -45,7 +46,7 @@ from .text_normalizer import clean_line, clean_multiline, is_blank, normalize_he
 
 _LABEL_SEPARATOR_RE = re.compile(r"[:\t]")
 # Prozessnummer wie "03.02", "03.02.001" oder "03.02.001.01", gefolgt von einer Bezeichnung.
-_PROCESS_LINE_RE = re.compile(r"^\d{2}(?:\.\d+)+\s+\S")
+_PROCESS_LINE_RE = re.compile(r"^(?:\d{2}(?:\.\d+)+\.?|\d{2}-\d+(?:-\d+)+)\s+\S")
 _DEFAULT_UNASSIGNED_REASON = "Bild liegt außerhalb eines eindeutig zuordenbaren Textfeldes"
 _FLOATING_REASON = "Frei positioniertes Bild; die Position zum Text ist nicht eindeutig"
 _NAME_IMAGE_REASON = "Bild im Testfallnamen; die Summary kann keine Bilder aufnehmen"
@@ -76,6 +77,9 @@ class _TestCaseParser:
         self._profile = profile
         self._layouts = layouts
         self._name_aliases = {normalize_heading(alias) for alias in profile.aliases_for(TESTCASE_NAME_KEY)} - {""}
+        aliases = sorted((re.escape(alias) for alias in profile.aliases_for(TESTCASE_NAME_KEY)), key=len, reverse=True)
+        aliases = [alias.replace(r"\ ", r"\s+") for alias in aliases]
+        self._name_label_re = re.compile(rf"(?<!\w)(?:{'|'.join(aliases)})\s*[:\t]\s*", re.IGNORECASE)
         self._image_reasons: dict[int, str] = {}
         self._ignored_image_ids: set[int] = set()
         self._warnings: list[Issue] = []
@@ -84,7 +88,7 @@ class _TestCaseParser:
         cover = self._find_cover()
         info_table = self._build_info_table(cover.table if cover else None)
         steps = self._collect_steps()
-        name = self._plain_text(cover.name_lines, reason=_NAME_IMAGE_REASON, single_line=True) if cover else ""
+        name = _clean_testcase_name(self._plain_text(cover.name_lines, reason=_NAME_IMAGE_REASON, single_line=True)) if cover else ""
 
         assigned: set[int] = set(info_table.image_ids()) if info_table else set()
         for step in steps:
@@ -105,6 +109,7 @@ class _TestCaseParser:
             profile_id=self._profile.id,
             name=name,
             steps=steps,
+            source_word_filename=self._document.source_path.name,
             labels=_cover_labels(cover.table) if cover else [],
             responsible_names=cover_responsibles(self._document),
             process_path=cover.process_path if cover else [],
@@ -145,11 +150,13 @@ class _TestCaseParser:
                 if name_lines is None:
                     continue
                 if cover is None:
-                    process_path, title = _cover_header(paragraphs[:index])
+                    marker = self._name_label_re.search(paragraphs[index].text)
+                    inline_prefix = paragraphs[index].text[: marker.start()] if marker else ""
+                    process_path, title = _cover_header(paragraphs[:index], inline_prefix)
                     cover = _Cover(name_lines=name_lines, process_path=process_path, title=title, table=table)
                 # Treffer in anderen Tabellen sind z. B. Verweise auf Vorgängertestfälle, keine konkurrierenden Namen.
                 if table is cover.table:
-                    names.append(self._plain_text(name_lines, reason=_NAME_IMAGE_REASON, single_line=True))
+                    names.append(_clean_testcase_name(self._plain_text(name_lines, reason=_NAME_IMAGE_REASON, single_line=True)))
         if cover is not None and len(set(names)) > 1:
             self._warnings.append(
                 Issue(
@@ -185,22 +192,13 @@ class _TestCaseParser:
                 # Eine Folgezeile "Bezeichner: Wert" ist ein anderes Feld, nicht der Testfallname.
                 return None if _LABEL_SEPARATOR_RE.search(following.text) else [following.segments]
             return None
-        prefix = ""
-        for position, segment in enumerate(paragraph.segments):
-            if isinstance(segment, ImageRef):
-                return None
-            if not isinstance(segment, str):
-                continue
-            match = _LABEL_SEPARATOR_RE.search(segment)
-            if match is None:
-                prefix += segment
-                continue
-            if normalize_heading(prefix + segment[: match.start()]) not in self._name_aliases:
-                return None
-            rest = segment[match.end() :]
-            value: list[Segment] = ([rest] if rest else []) + list(paragraph.segments[position + 1 :])
-            return [value] if _lines_have_content([value]) else None
-        return None
+        full_text = paragraph.text
+        match = self._name_label_re.search(full_text)
+        if match is None:
+            return None
+        value = _segments_after_offset(paragraph.segments, match.end())
+        value = _truncate_responsible(value)
+        return [value] if _lines_have_content([value]) else None
 
     # --- Tabelle mit zentralen Informationen -------------------------------------------
 
@@ -239,12 +237,18 @@ class _TestCaseParser:
         rows: list[list[RichText]] = []
         for row in table.rows:
             cells = [
-                RichText() if cell.vmerge == "continue" else self._rich_text([p.segments for p in cell.paragraphs])
-                for cell in row.cells
+                RichText() if cell.vmerge == "continue" else self._cell_rich_text(cell, field_label=row.is_header or index == 0)
+                for index, cell in enumerate(row.cells)
             ]
             if any(not cell.is_empty() for cell in cells):
                 rows.append(cells)
         return InfoTable(rows=rows, source_location=f"Tabelle {table.table_index}") if rows else None
+
+    def _cell_rich_text(self, cell: SourceCell, *, field_label: bool = False) -> RichText:
+        lines = [paragraph.segments for paragraph in cell.paragraphs]
+        if field_label:
+            lines = [[_without_formatting(segment) for segment in line] for line in lines]
+        return self._rich_text(lines)
 
     # --- Testschritte ---------------------------------------------------------------
 
@@ -338,6 +342,8 @@ class _TestCaseParser:
             for segment in line:
                 if isinstance(segment, str):
                     items.append(segment)
+                elif isinstance(segment, TextRun):
+                    items.append(StyledText(segment.text, segment.bold, segment.italic, segment.underline, segment.color))
                 elif isinstance(segment, CheckboxRef):
                     items.append(CheckboxMarker(segment.checked))
                 elif segment.floating:
@@ -357,15 +363,82 @@ class _TestCaseParser:
             for segment in line:
                 if isinstance(segment, ImageRef):
                     self._image_reasons.setdefault(segment.image_id, reason)
-            texts.append("".join(segment for segment in line if isinstance(segment, str)))
+            texts.append("".join(_segment_text(segment) for segment in line if isinstance(segment, (str, TextRun))))
         if single_line:
             return clean_line(" ".join(texts))
         return clean_multiline("\n".join(texts))
 
 
-def _cover_header(paragraphs: list[SourceParagraph]) -> tuple[list[str], str]:
+_RESPONSIBLE_SUFFIX_RE = re.compile(r"(?<!\w)\s*Verantwortliche(?:r|s)?\s*:\s*.*$", re.IGNORECASE)
+_TESTCASE_PREFIX_RE = re.compile(r"^(?:Testfall\s*:\s*)+", re.IGNORECASE)
+
+
+def _segment_text(segment: Segment) -> str:
+    return segment if isinstance(segment, str) else segment.text if isinstance(segment, TextRun) else ""
+
+
+def _segments_after_offset(segments: list[Segment], offset: int) -> list[Segment]:
+    result: list[Segment] = []
+    remaining = offset
+    for segment in segments:
+        if not isinstance(segment, (str, TextRun)):
+            if remaining <= 0:
+                result.append(segment)
+            continue
+        text = _segment_text(segment)
+        if remaining >= len(text):
+            remaining -= len(text)
+            continue
+        text = text[remaining:]
+        remaining = 0
+        if text:
+            result.append(TextRun(text, segment.bold, segment.italic, segment.underline, segment.color) if isinstance(segment, TextRun) else text)
+    return result
+
+
+def _without_formatting(segment: Segment) -> Segment:
+    return TextRun(segment.text) if isinstance(segment, TextRun) else segment
+
+
+def _truncate_responsible(segments: list[Segment]) -> list[Segment]:
+    result: list[Segment] = []
+    for segment in segments:
+        if not isinstance(segment, (str, TextRun)):
+            result.append(segment)
+            continue
+        text = _segment_text(segment)
+        match = _RESPONSIBLE_SUFFIX_RE.search(text)
+        if match:
+            prefix = text[:match.start()].rstrip()
+            if prefix:
+                result.append(TextRun(prefix, segment.bold, segment.italic, segment.underline, segment.color) if isinstance(segment, TextRun) else prefix)
+            break
+        result.append(segment)
+    return result
+
+
+def _clean_testcase_name(value: str) -> str:
+    return _clean_cover_value(_TESTCASE_PREFIX_RE.sub("", value))
+
+
+def _has_outer_angle_brackets(value: str) -> bool:
+    return len(value) >= 2 and value.startswith("<") and value.endswith(">")
+
+
+def _clean_cover_value(value: str) -> str:
+    cleaned = clean_line(value)
+    return cleaned[1:-1].strip() if _has_outer_angle_brackets(cleaned) else cleaned
+
+
+def _cover_header(paragraphs: list[SourceParagraph], inline_prefix: str = "") -> tuple[list[str], str]:
     """Prozesspfad und Beschreibung vor der Testfall-Zeile aus dem Deckblatt lesen."""
-    texts = [clean_line(normalize_newlines(paragraph.text).replace("\n", " ")) for paragraph in paragraphs]
+    texts = [
+        _clean_cover_value(line)
+        for paragraph in paragraphs
+        for line in normalize_newlines(paragraph.text).split("\n")
+        if clean_line(line)
+    ]
+    texts.extend(_clean_cover_value(line) for line in normalize_newlines(inline_prefix).split("\n") if clean_line(line))
     process_indices = [index for index, text in enumerate(texts) if _PROCESS_LINE_RE.match(text)]
     if not process_indices:
         return [], ""
@@ -379,7 +452,7 @@ def _cover_labels(table: SourceTable | None) -> list[str]:
     if table is None or not table.rows or not table.rows[0].cells:
         return []
     for paragraph in table.rows[0].cells[0].paragraphs:
-        label = clean_line(paragraph.text)
+        label = _clean_cover_value(paragraph.text)
         if label:
             return [label]
     return []
@@ -390,8 +463,8 @@ def _cell_headings(table: SourceTable) -> set[str]:
 
 
 def _lines_have_content(lines: Lines) -> bool:
-    return any(isinstance(segment, (ImageRef, CheckboxRef)) or not is_blank(segment) for line in lines for segment in line)
+    return any(isinstance(segment, (ImageRef, CheckboxRef)) or not is_blank(_segment_text(segment)) for line in lines for segment in line)
 
 
 def _inline_line_blank(line: list[Inline]) -> bool:
-    return all(isinstance(item, str) and is_blank(item) for item in line)
+    return all(isinstance(item, (str, StyledText)) and is_blank(item if isinstance(item, str) else item.text) for item in line)

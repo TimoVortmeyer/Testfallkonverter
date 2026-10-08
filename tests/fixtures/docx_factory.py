@@ -78,7 +78,7 @@ class StepSpec:
 
 @dataclass
 class DocSpec:
-    name: str | None = "TF_Beispiel_001"
+    name: str | None = "TFB_Beispiel_001"
     process_lines: tuple[str, ...] = ("03.02 Einkaufsverwaltung", "03.02.001 Pflege Einkaufskonditionen")
     title_lines: tuple[str, ...] = ("Prüfung der", "Beispielkonditionen")
     responsible: str = "Max Mustermann"

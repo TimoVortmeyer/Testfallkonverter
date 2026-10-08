@@ -16,6 +16,7 @@ def test_aeltere_vorlage_wird_erkannt_und_exportiert(input_dir: Path, output_dir
             ("2", "Transaktion SE16, Tabelle SKB1", "Feldstatusgruppe", "Buchungskreise W001\nOP-Verwaltung = X", ""),
         ],
         cover_label="FICO-EH",
+        name="TFB_EG930_Beispiel",
     )
 
     assert run_convert() == 0
@@ -25,7 +26,7 @@ def test_aeltere_vorlage_wird_erkannt_und_exportiert(input_dir: Path, output_dir
     assert [check["profile"] for check in entry["checked_profiles"] if check["matched"]] == ["lunar_legacy_v1"]
 
     testcase = load_testcase(output_dir, "alt")
-    assert testcase["summary"] == "EG930_Beispiel"
+    assert testcase["summary"] == "TFB_EG930_Beispiel"
     assert testcase["labels"] == ["FICO-EH"]
     assert testcase["description"] == (
         "h1. Initiale Übernahme der Sachkonten\n\n"

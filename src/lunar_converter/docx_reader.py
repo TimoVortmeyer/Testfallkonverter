@@ -19,7 +19,7 @@ from docx.opc.constants import RELATIONSHIP_TYPE as RT
 
 from .exceptions import InputFileError
 from .models import SourceDocument
-from .ooxml_traversal import BodyTraversal, ResolvedImage, StyleClassifier
+from .ooxml_traversal import BodyTraversal, EmbeddedWordDocumentDetected, NestedTableDetected, ResolvedImage, StyleClassifier
 
 
 def read_docx(path: Path) -> SourceDocument:
@@ -30,9 +30,25 @@ def read_docx(path: Path) -> SourceDocument:
         is_heading_style=_heading_style_classifier(document),
         numbering=_numbering_element(document),
         styles=document.styles.element,
+        is_embedded_word=lambda relationship_id, prog_id: _is_embedded_word(document, relationship_id, prog_id),
     )
     try:
         blocks = traversal.traverse(document.element.body)
+    except EmbeddedWordDocumentDetected as exc:
+        raise InputFileError(
+            f"Eingebettetes Word-Dokument kann nicht verarbeitet werden: {exc.location}.",
+            field=exc.location,
+            details=f"OLE ProgID: {exc.prog_id}; Verarbeitungsphase: DOCX-Objekterkennung.",
+            code="embedded_word_document_not_processed",
+        ) from exc
+    except NestedTableDetected as exc:
+        location = "; ".join(exc.locations)
+        raise InputFileError(
+            f"Verschachtelte Word-Tabelle wird nicht unterstützt: {location}.",
+            field=location,
+            details=f"{len(exc.locations)} innere Tabelle(n); Verarbeitungsphase: DOCX-Strukturerkennung.",
+            code="nested_table_not_supported",
+        ) from exc
     except Exception as exc:
         raise InputFileError(
             "Der Dokumentinhalt konnte nicht ausgewertet werden (Phase: DOCX-Auswertung, Dokumentkörper).",
@@ -54,6 +70,24 @@ def _numbering_element(document: DocxDocument) -> Any | None:
         return document.part.part_related_by(RT.NUMBERING).element
     except KeyError:
         return None
+
+
+def _is_embedded_word(document: DocxDocument, relationship_id: str | None, prog_id: str | None) -> bool:
+    if prog_id and prog_id.casefold().startswith("word.document"):
+        return True
+    if not relationship_id:
+        return False
+    relationship = document.part.rels.get(relationship_id)
+    if relationship is None or relationship.is_external:
+        return False
+    target = relationship.target_part
+    content_type = getattr(target, "content_type", "").casefold()
+    part_name = str(getattr(target, "partname", "")).casefold()
+    return (
+        "wordprocessingml.document" in content_type
+        or content_type == "application/msword"
+        or part_name.endswith((".doc", ".docx"))
+    )
 
 
 def _open_document(path: Path) -> DocxDocument:
@@ -80,6 +114,7 @@ def _count_header_footer_images(document: DocxDocument) -> int:
         traversal = BodyTraversal(
             resolve_image=lambda rel_id, linked: ResolvedImage(part_name=None, blob=None),
             is_heading_style=lambda style_id: False,
+            reject_nested_tables=False,
         )
         traversal.traverse(relationship.target_part.element)
         count += len(traversal.images)

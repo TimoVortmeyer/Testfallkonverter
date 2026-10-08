@@ -57,7 +57,7 @@ def test_gh_eingabedaten_text_und_bilder_folgen_der_aktion(input_dir: Path, outp
             ("1", "", "Geschäftsprozess-Schritt", "", "Eingabedaten", "Ergebnis"),
             ("2", "", "Zweiter Geschäftsprozess-Schritt", "", "", "Ergebnis 2"),
         ],
-        name="GH – Prüfung Öl & Sonderzeichen",
+        name="TFB_GH – Prüfung Öl & Sonderzeichen",
     )
     document = Document(str(path))
     table = next(
@@ -75,7 +75,7 @@ def test_gh_eingabedaten_text_und_bilder_folgen_der_aktion(input_dir: Path, outp
 
     testcase = load_testcase(output_dir, "dateiname_anders")
     step = testcase["steps"][0]
-    assert testcase["summary"] == "GH – Prüfung Öl & Sonderzeichen"
+    assert testcase["summary"] == "TFB_GH – Prüfung Öl & Sonderzeichen"
     assert step["action"] == (
         "Geschäftsprozess-Schritt\n!0001.png!\nEingabedaten\n!0002.png!\n!0003.png!"
     )

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.oxml import parse_xml
-from docx.shared import Inches
+from docx.shared import Inches, RGBColor
 
 from tests.fixtures.docx_factory import PNG, DocSpec, StepSpec, build_lunar_docx
 from tests.helpers import RunConvert, error_codes, file_entry, final_entries, load_report, load_testcase
@@ -31,6 +31,59 @@ def test_leerer_testfallname_wird_durch_dateinamen_ersetzt(input_dir: Path, outp
 
     assert run_convert() == 0
     assert load_testcase(output_dir, "leer")["summary"] == "leer"
+
+
+def test_same_paragraph_responsible_is_not_appended_to_summary_and_prefixes_are_cleaned(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
+    path = build_lunar_docx(input_dir / "TFB_03.04.001_EH_066_Rechnung.docx")
+    document = Document(str(path))
+    document.tables[0].cell(1, 0).text = (
+        "03.04 Rechnungsprüfung\nTestfall: Testfall: TFB_03.04.001_EH_066_Rechnungsprüfung_mit_Posabgl_LUNAR_EH "
+        "Verantwortlicher: <Christoph Schäfer>"
+    )
+    document.save(str(path))
+
+    assert run_convert() == 0
+
+    testcase = load_testcase(output_dir, "TFB_03.04.001_EH_066_Rechnung")
+    assert testcase["summary"] == "TFB_03.04.001_EH_066_Rechnungsprüfung_mit_Posabgl_LUNAR_EH"
+    assert "Christoph_Schäfer" in testcase["labels"]
+
+
+def test_generischer_deckblattname_faellt_auf_tfb_dateinamen_zurueck(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
+    stem = "TFB_06.04.003_GH_18-00144-004_Tabakrückverfolgbarkeit_01_Kundena"
+    path = build_lunar_docx(input_dir / f"{stem}.docx", DocSpec(name="<Rückverfolgbarkeit im Kundenauftrag>", responsible="<Sven Piorkowski>"))
+    document = Document(str(path))
+    document.tables[0].cell(0, 0).text = "<RWWS GH LuV>"
+    document.save(str(path))
+
+    assert run_convert() == 0
+
+    entry = file_entry(load_report(output_dir), f"{stem}.docx")
+    testcase = load_testcase(output_dir, stem)
+    assert testcase["summary"] == stem
+    assert testcase["source_word_filename"] == f"{stem}.docx"
+    assert any(warning["code"] == "testcase_name_from_filename" for warning in entry["warnings"])
+    assert "Sven_Piorkowski" in testcase["labels"]
+    assert "RWWS_GH_LuV" in testcase["labels"]
+
+
+def test_nicht_verifizierte_textfarbe_steht_als_reportwarnung(
+    input_dir: Path, output_dir: Path, run_convert: RunConvert
+) -> None:
+    path = build_lunar_docx(input_dir / "farbe.docx")
+    document = Document(str(path))
+    info = next(table for table in document.tables if any(cell.text == "Kurzbeschreibung" for row in table.rows for cell in row.cells))
+    info.cell(1, 1).paragraphs[0].runs[0].font.color.rgb = RGBColor(0xFF, 0, 0)
+    document.save(str(path))
+
+    assert run_convert() == 0
+
+    entry = file_entry(load_report(output_dir), "farbe.docx")
+    assert any(issue["code"] == "unsupported_text_color" for issue in entry["warnings"])
 
 
 def test_mehrere_unterschiedliche_namensfelder_werden_abgelehnt(
@@ -60,7 +113,7 @@ def test_testfallverweis_in_spaeterer_tabelle_ist_kein_zweiter_name(
 
     entry = file_entry(load_report(output_dir), "verweis.docx")
     assert not any(warning["code"] == "ambiguous_testcase_name" for warning in entry["warnings"])
-    assert load_testcase(output_dir, "verweis")["summary"] == "TF_Beispiel_001"
+    assert load_testcase(output_dir, "verweis")["summary"] == "TFB_Beispiel_001"
 
 
 def test_legacy_formcheckbox_wird_vor_textverarbeitung_gerendert(
@@ -110,7 +163,9 @@ def test_legacy_formcheckbox_wird_vor_textverarbeitung_gerendert(
 
     testcase = load_testcase(output_dir, "legacy_checkbox")
     assert "(/) An (x) Aus FORMTEXT" in testcase["description"]
-    assert "[Wingdings U+F0B0]" in testcase["steps"][0]["action"]
+    assert "[Wingdings" not in testcase["steps"][0]["action"]
+    entry = file_entry(load_report(output_dir), "legacy_checkbox.docx")
+    assert any(warning["code"] == "unsupported_wingdings_glyph" for warning in entry["warnings"])
     entry = file_entry(load_report(output_dir), "legacy_checkbox.docx")
     assert entry["errors"] == []
     assert not any("CheckboxRef" in warning["message"] for warning in entry["warnings"])

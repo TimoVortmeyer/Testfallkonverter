@@ -293,12 +293,11 @@ Der Ordnername wird ausschließlich aus dem Dateinamen gebildet und bleibt von
 der fachlichen Summary getrennt. `summary` wird aus dem im Dokument erkannten
 Feld `Testfallname` (Profilalias `testfallname`, zum Beispiel `Testfall: <Name>`)
 übernommen. Steht der Bezeichner allein in einer Tabellenzelle, wird der Wert der
-Nachbarzelle verwendet. Wird kein Name erkannt oder ist er leer, wird der
-Dateiname ohne Endung als `summary` verwendet (Reportwarnung
+Nachbarzelle verwendet. Das bereinigte Ergebnis muss mit `TFB` beginnen; sonst
+wird der Dateiname ohne Endung als `summary` verwendet (Reportwarnung
 `testcase_name_from_filename`). Mehrere unterschiedliche Namensfelder in derselben
-Deckblatt-Tabelle erzeugen
-die Reportwarnung `ambiguous_testcase_name`; die Datei wird dann mit
-`required_field_missing` abgelehnt.
+Deckblatt-Tabelle erzeugen die Reportwarnung `ambiguous_testcase_name`; die Datei
+wird dann mit `required_field_missing` abgelehnt.
 Ungültige Zeichen (`<>:"/\|?*`, Steuerzeichen)
 und – wie im POC – Leerraum werden durch `_` ersetzt; reservierte Windows-Namen (`CON`, `NUL`, …)
 erhalten ein `_`. Ergeben zwei Quelldateien denselben Ordnernamen (z. B.
@@ -404,21 +403,41 @@ Informationen und Schritttabelle:
 | Deckblatt: Prozesspfad | Nummerierte Prozesszeilen vor der Testfall-Zeile, in Dokumentreihenfolge | `custom_fields.customfield_15909` = `"Prozess1/Prozess2/…"` |
 | Deckblatt: optionale Testfallbeschreibung | Nicht nummerierte Absätze nach der letzten Prozesszeile und vor der Testfall-Zeile | `description`: `h1. <Testfallbeschreibung>` |
 | Deckblatt: `Testfall: <Name>` | Profilalias `testfallname` | `summary` |
+| Quelldateiname | Dateiname der ursprünglichen Word-Datei einschließlich Erweiterung | `source_word_filename` |
 | Tabelle mit zentralen Informationen | Tabelle mit den Bezeichnern aus `info_table.required_labels`, sonst letzte Tabelle vor der Schritttabelle; nie die Deckblatt-Tabelle | an `description` angehängte Jira-Wiki-Tabelle |
 | Schritttabelle | Pflichtspalten des Profils | `steps[]` (wie bisher) |
 
-Wiki-Tabelle: jede Zeile `|Zelle|Zelle|`, leere Zellen als `| |`, Zeilenumbrüche
-in Zellen als `\\`, `|` im Text als `\|`. Vollständig leere Zeilen entfallen.
+Wiki-Tabelle: jede Zeile `|Zelle|Zelle|`, leere Zellen als `| |`, normale
+Zeilenumbrüche in Zellen als `\\`, `|` im Text als `\|`. Listenpunkte in
+Zellen bleiben getrennte Jira-Wiki-Listenzeilen (`*`, `**`, `#`, `##`).
+Vollständig leere Zeilen entfallen. Innere Word-Tabellen werden nicht konvertiert;
+die Datei wird mit `nested_table_not_supported` und Tabellen-/Zeilen-/Zellfundstelle
+abgelehnt, damit keine verschobenen oder unvollständigen Inhalte exportiert werden.
 Bilder in der Tabelle werden an ihrer Position als `!0001.png!` verankert und als
 globale Screenshots exportiert.
 Bekannte Jira-Emoticon-Kürzel in Quelldaten werden escaped, damit Jira sie als
 Text darstellt. Word-Checkboxen in der Info-Tabelle werden gezielt als `(/)`
 (angekreuzt) bzw. `(x)` (leer) ausgegeben.
-Wingdings-Zeichen in Text-Runs und Word-Symbolen werden, soweit bekannt,
-semantisch in Unicode-Pfeile oder Aufzählungszeichen umgewandelt. Nummerierung,
-Listenebene, Absatzeinzug und führende Tabulatoren bleiben als Bullet- bzw.
-Hierarchiemarker sichtbar. Unbekannte Glyphen werden mit einer Textmarkierung
-ausgegeben und im Report mit Dokument und Fundstelle gewarnt.
+Fett, kursiv und unterstrichen formatierte Runs in fachlichen Feldern werden als
+Jira-Wiki-Markup `*fett*`, `_kursiv_` und `+unterstrichen+` übernommen. Formatierung
+von Word-Überschriften und strukturellen Feldbezeichnern wird nicht übernommen.
+Word-Textfarben werden mangels Verifikation des Jira-Renderers nicht als
+Farbmarkup ausgegeben; eine nicht standardmäßige Farbe erzeugt stattdessen die
+Warnung `unsupported_text_color` mit Dokument und Fundstelle, während Text sowie
+Fett/Kursiv/Unterstrichen erhalten bleiben.
+Tabs innerhalb normalen Textes werden als Leerraum normalisiert. Führende Tabs
+und rein optische Word-Absatzeinzüge ohne Word-Nummerierung werden verworfen;
+Text wird linksbündig und ohne Hierarchiemarker ausgegeben. Echte
+Word-Listenebenen und nummerierte Listen werden als Jira-Wiki-Listen (`*`/`#`)
+ausgegeben. Wingdings-Zeichen in
+Text-Runs und Word-Symbolen werden, soweit bekannt, semantisch in Unicode
+umgewandelt. Unterstützte Wingdings-Pfeile: `D8`, `E0` und `F0` (→), `E1` (↑),
+`E2` (↓), `E3` (↔), `E4` (↕); `6C`/`6E`/`6F` werden zu Aufzählungszeichen.
+Unbekannte Glyphen werden ausgelassen und als `unsupported_wingdings_glyph` mit
+Dokument und Fundstelle im Report gewarnt; technische Platzhalter werden nicht
+in den Fachtext geschrieben. Aufeinanderfolgende manuell mit Bindestrich
+markierte Absätze in einer Tabellenzelle bleiben als getrennte Bindestrichzeilen
+erhalten; sie werden nicht mit `\\` zu einem Absatz zusammengezogen.
 Labels ersetzen Whitespace durch `_` und werden auf maximal 255 Zeichen gekürzt;
 zulässig sind im Import 1 bis 255 Zeichen ohne Whitespace.
 
@@ -548,7 +567,7 @@ nur bei Erfolg befüllt.
 | `1` | mindestens eine Datei fehlgeschlagen |
 | `2` | globaler Fehler vor der Verarbeitung: Output-Ordner nicht leer, Eingabeordner fehlt, Profil/Schema ungültig, unbekanntes `--profile`; ebenso ungültige CLI-Parameter |
 
-Fehlercodes je Datei: `input_file_error`, `docx_content_error`, `doc_conversion_failed`,
+Fehlercodes je Datei: `input_file_error`, `docx_content_error`, `nested_table_not_supported`, `embedded_word_document_not_processed`, `unsupported_text_color`, `doc_conversion_failed`,
 `no_matching_profile`, `ambiguous_profile`,
 `required_field_missing`, `schema_validation_failed`, `missing_image_reference`,
 `output_name_conflict`, `export_failed`, `unexpected_error`.
@@ -624,25 +643,52 @@ den Tests gemockt. Ein echter Word-Test läuft nur, wenn die Umgebungsvariable
 $env:LUNAR_TEST_WORD_DOC = "C:\temp\input\beispiel.doc"; python -m pytest -k echte_word
 ```
 
-## 18. Bekannte Grenzen
+## 18. Bekannte Einschränkungen und offene technische Punkte
+
+### Aktueller Retest-Stand
+
+**Einrückung (umgesetzte Codekorrektur):** Führende Tabs und Absatz-Einzüge
+ohne Word-Nummerierung werden verworfen und linksbündig ausgegeben. Sie erzeugen
+keine sichtbaren `↳`-Hierarchiemarker. Nur erkannte Word-Nummerierung (direktes
+`w:numPr` oder ein nummerierender Absatzstil) wird als Jira-Wiki-Liste gerendert;
+die Word-Listenebene bleibt erhalten. Reine optische Einrückung geht bewusst
+verloren.
+
+Die folgenden Punkte sind offene Retest-Befunde und in dieser Patchrunde nicht
+als zusätzliche Codeänderungen umgesetzt:
+
+| Thema | Ist-Zustand / Auswirkung | Referenz / Abhängigkeit | Nächster Prüfschritt |
+|---|---|---|---|
+| Einzelner Bindestrich als Stern | Im Retest wurde für den alleinstehenden Wert `-` bei „Vorgängerbelege“ die Darstellung `*` gemeldet. Gewünscht ist ein sichtbarer Bindestrich; echte Word-Listen müssen Listen bleiben. | `TFB_14.02.008_BLP_051_Regeleditor_sukzessives_abspeichern.docx`; Referenz-XML für diese Zeile muss noch gesichert werden. | Prüfen, ob die einzelne Zelle `w:numPr`/einen nummerierenden Absatzstil enthält oder ob Zielrenderer/Tabellenkontext `-` umdeutet; keine dateispezifische Regel. |
+| Feldbezeichnungsformatierung | „Datum der letzten Änderung“ erscheint fett, vergleichbare Feldbezeichner nicht. Wertzellen und Testschritte sollen ihr fachliches Inline-Markup behalten. | `TFB_14.01.007_EH_150_PLU_Vergabe_ZWS.docx`; semantische Feldspalte versus Wertzelle unterscheiden. | XML-Runformatierung der Bezeichner und Zellpositionen vergleichen; einheitliche Feldbezeichnerdarstellung festlegen. |
+| Textfarbe | Der Textinhalt bleibt erhalten, Word-Farbe wird nicht nach Jira übertragen. Keine Farbsyntax ist für die konkrete Jira/Xray-Instanz verifiziert. | `TFB_06.04.003_GH_18-00144-004_Tabakrückverfolgbarkeit_02_Lagerfa.docx`; Renderer-Unterstützung in Jira Description, Action und Expected Result ist erforderlich. | Mit einem kontrollierten Jira-Pilotmarkup je Zielfeld die tatsächlich unterstützte Farbdarstellung prüfen; bis dahin `unsupported_text_color` als Warnung verwenden. |
+| Einheitlichkeit Konverter-/Importer-Ausgaben | Statusbegriffe, Fehlercodes, Zeitstempel, relative Pfade, Fortschritt, Abschlussmeldungen, Report-/CSV-Strukturen, Teilfehler und Maskierung sensibler Inhalte unterscheiden sich. Eine eindeutige Korrelation des Konvertierungsergebnisses zum späteren Importergebnis fehlt. Außerdem ist nicht klar abgegrenzt, welche Ausgaben für Benutzer und welche für technische Diagnose vorgesehen sind. | Konverter und Importer; betrifft Diagnose und Korrelation der zwei Laufphasen. | Ist-Aufnahme und gemeinsame Begriffe/Korrelations-ID samt Ausgabevertrag priorisieren; danach in kleinen kompatiblen Paketen vereinheitlichen. |
+| Weitere verschachtelte Tabellen und eingebettete Objekte | Verschachtelte Tabellen werden sicher mit `nested_table_not_supported` abgelehnt. Eingebettete Word-OLEs werden mit `embedded_word_document_not_processed` abgelehnt; andere OLE-Typen werden nicht ausgeführt. | Komplexe Tabellen, verbundene Zellen, mehrere Ebenen, Listen/Bilder in inneren Tabellen, Word/Excel/PDF-OLE und verknüpfte Objekte. | Weitere OOXML-Varianten inventarisieren; Fehlermeldung/Fundstelle und Abgrenzung zu Bildern prüfen. Eingebettete Inhalte nie ausführen; kein stiller Inhaltsverlust. |
+| Codepflege und Optimierung | Es gibt überlappende Normalisierung und Parsinglogik für Tabs, Listen, Wingdings, Runs, Reports und Schema. | `ooxml_traversal.py`, `lunar_parser.py`, `target_renderer.py`, Validatoren und Fehlercodes beider Projekte. | Zuerst technische Bestandsaufnahme; danach kleine, getrennte Refactoring-Pakete mit Regressionstests. Fachliche Änderungen von reinem Refactoring trennen. |
+
+### Bekannte Grenzen
 
 - Bildpositionen werden aus der Struktur (Absatz/Zelle) abgeleitet, nicht aus
   dem gerenderten Seitenlayout. Frei positionierte (schwebende) Bilder und Bilder
   außerhalb der Zellen (z. B. unter der Tabelle) werden daher bewusst als
   globale Screenshots ohne Anker behandelt.
-- Textfelder/Textboxen werden in den Text übernommen, Formen, SmartArt,
-  Diagramme und eingebettete OLE-Objekte nicht (deren Vorschaubilder sind meist
-  EMF/WMF und damit nicht unterstützt).
+- Textfelder/Textboxen werden in den Text übernommen, Formen, SmartArt und
+  Diagramme nicht. Eingebettete Word-OLE-Objekte werden mit
+  `embedded_word_document_not_processed` abgelehnt; andere OLE-Objekte werden
+  nicht ausgeführt und ihr interner Inhalt wird nicht ausgelesen.
 - Vertikal verbundene Zellen (`vMerge`) übernehmen den Text der Ursprungszelle,
   Bilder werden nicht dupliziert. Zeilen mit einer über mehrere Inhaltsspalten
   verbundenen Zelle gelten als Layout-Zeile und werden mit Warnung ignoriert.
-- Prozesszeilen werden nur an der Nummerierung (`NN.NN …`, `NN.NN.NNN …`)
-  erkannt; ohne Prozesszeilen gibt es auch keine Testfallbeschreibung (`h1.`).
+- Prozesszeilen werden nach Entfernen eines vollständig umschließenden
+  Klammerpaars an der Nummerierung (`NN.NN …`, `NN.NN.NNN …` oder
+  `NN-NNN-NNN …`) erkannt; ohne Prozesszeilen gibt es auch keine
+  Testfallbeschreibung (`h1.`).
 - Ohne `info_table.required_labels` gilt die letzte Tabelle vor der
   Schritttabelle als Info-Tabelle; weitere Tabellen davor werden nicht übernommen. Jira-Wiki-
   Tabellen kennen keine verbundenen Zellen; verbundene Zellen erscheinen als eine Zelle.
-- Nummerierungen/Aufzählungszeichen aus Word-Listen werden nicht als Text
-  übernommen.
+- Absätze mit echter Word-Nummerierung (`w:numPr` oder nummerierendem Absatzstil)
+  werden als Jira-Wiki-Listen gerendert und behalten ihre Ebene. Rein optische
+  Tabs und Absatzeinzüge ohne Nummerierung werden linksbündig ausgegeben.
 - Kopf- und Fußzeilen werden nicht ausgewertet.
 - Spalten der Schritttabelle ohne Zuordnung in `field_aliases` (z. B. „Feld“ in
   `lunar_legacy_v1`) werden ohne Warnung ignoriert.

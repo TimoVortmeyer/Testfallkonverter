@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from .models import CheckboxRef, ImageKind, ImageRef, Issue, Segment, SourceBlock, SourceCell, SourceParagraph, SourceRow, SourceTable, VMerge
+from .models import CheckboxRef, ImageKind, ImageRef, Issue, Segment, SourceBlock, SourceCell, SourceParagraph, SourceRow, SourceTable, TextRun, VMerge
 
 NAMESPACES: dict[str, str] = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
@@ -53,6 +53,15 @@ W_NUM_FMT = qn("w:numFmt")
 W_LVL_TEXT = qn("w:lvlText")
 W_START = qn("w:start")
 W_RPR = qn("w:rPr")
+W_B = qn("w:b")
+W_I = qn("w:i")
+W_U = qn("w:u")
+W_COLOR = qn("w:color")
+W_RSTYLE = qn("w:rStyle")
+W_STYLE = qn("w:style")
+W_STYLE_ID = qn("w:styleId")
+W_STYLE_TYPE = qn("w:type")
+W_BASED_ON = qn("w:basedOn")
 W_R = qn("w:r")
 W_R_FONTS = qn("w:rFonts")
 W_ASCII = qn("w:ascii")
@@ -82,6 +91,7 @@ W_NO_BREAK_HYPHEN = qn("w:noBreakHyphen")
 W_DRAWING = qn("w:drawing")
 W_PICT = qn("w:pict")
 W_OBJECT = qn("w:object")
+O_OLE_OBJECT = "{urn:schemas-microsoft-com:office:office}OLEObject"
 W_TXBX_CONTENT = qn("w:txbxContent")
 W_VAL = qn("w:val")
 W14_VAL = qn("w14:val")
@@ -113,6 +123,7 @@ _WINGDINGS_GLYPHS = {
     ("wingdings", "e2"): "↓",
     ("wingdings", "e3"): "↔",
     ("wingdings", "e4"): "↕",
+    ("wingdings", "f0"): "→",
 }
 
 # Elemente ohne sichtbaren Inhalt oder mit gelöschtem/verstecktem Inhalt.
@@ -151,6 +162,20 @@ class ResolvedImage:
 
 ImageResolver = Callable[[str, bool], ResolvedImage]
 StyleClassifier = Callable[[str | None], bool]
+EmbeddedWordDetector = Callable[[str | None, str | None], bool]
+
+
+class NestedTableDetected(ValueError):
+    def __init__(self, locations: list[str]) -> None:
+        self.locations = locations
+        super().__init__("; ".join(locations))
+
+
+class EmbeddedWordDocumentDetected(ValueError):
+    def __init__(self, location: str, prog_id: str) -> None:
+        self.location = location
+        self.prog_id = prog_id
+        super().__init__(f"Eingebettetes Word-Dokument ({prog_id}) in {location}")
 
 
 class BodyTraversal:
@@ -162,13 +187,18 @@ class BodyTraversal:
         is_heading_style: StyleClassifier,
         numbering: Any | None = None,
         styles: Any | None = None,
+        reject_nested_tables: bool = True,
+        is_embedded_word: EmbeddedWordDetector | None = None,
     ) -> None:
         self._resolve_image = resolve_image
         self._is_heading_style = is_heading_style
         self._numbering = numbering
         self._styles = styles
+        self._reject_nested_tables = reject_nested_tables
+        self._is_embedded_word = is_embedded_word or (lambda relationship_id, prog_id: False)
         self._images: list[ImageRef] = []
         self._warnings: list[Issue] = []
+        self._warned_text_colors: set[tuple[str, str]] = set()
         self._list_counters: dict[tuple[int, int], int] = {}
         self._table_count = 0
         self._paragraph_count = 0
@@ -189,8 +219,30 @@ class BodyTraversal:
                 blocks.append(self._paragraph(element, f"Absatz {self._paragraph_count}"))
             else:
                 self._table_count += 1
+                if self._reject_nested_tables:
+                    locations = self._nested_table_locations(element, self._table_count)
+                    if locations:
+                        raise NestedTableDetected(locations)
                 blocks.append(self._table(element, self._table_count))
         return blocks
+
+    def _nested_table_locations(self, table: Any, outer_index: int) -> list[str]:
+        locations: list[str] = []
+        nested_index = 0
+
+        def scan(current_table: Any, table_path: str) -> None:
+            nonlocal nested_index
+            for row_index, tr in enumerate(_iter_content(current_table, (W_TR,)), start=1):
+                for cell_index, tc in enumerate(_iter_content(tr, (W_TC,)), start=1):
+                    cell_path = f"{table_path}, Zeile {row_index}, Zelle {cell_index}"
+                    for nested in _iter_content(tc, (W_TBL,)):
+                        nested_index += 1
+                        nested_path = f"innere Tabelle {outer_index + nested_index}: {cell_path}"
+                        locations.append(nested_path)
+                        scan(nested, f"Tabelle {outer_index + nested_index}")
+
+        scan(table, f"Tabelle {outer_index}")
+        return locations
 
     def _table(self, tbl: Any, table_index: int) -> SourceTable:
         rows: list[SourceRow] = []
@@ -205,42 +257,55 @@ class BodyTraversal:
         for cell_index, tc in enumerate(_iter_content(tr, (W_TC,)), start=1):
             span = max(1, _int_attribute(tc.find(f"{qn('w:tcPr')}/{qn('w:gridSpan')}"), default=1))
             cell_location = f"{location}, Zelle {cell_index}"
+            paragraphs, nested_tables = self._cell_content(tc, cell_location)
             cells.append(
                 SourceCell(
-                    paragraphs=self._cell_paragraphs(tc, cell_location),
+                    paragraphs=paragraphs,
                     grid_column=grid_column,
                     grid_span=span,
                     vmerge=_vmerge(tc),
+                    nested_tables=nested_tables,
                 )
             )
             grid_column += span
         return SourceRow(cells=cells, is_header=is_header)
 
-    def _cell_paragraphs(self, container: Any, location: str) -> list[SourceParagraph]:
-        # Verschachtelte Tabellen werden in Lesereihenfolge in die Zelle eingeflacht.
+    def _cell_content(self, container: Any, location: str) -> tuple[list[SourceParagraph], list[SourceTable]]:
         paragraphs: list[SourceParagraph] = []
+        nested_tables: list[SourceTable] = []
         for element in _iter_content(container, (W_P, W_TBL)):
             if element.tag == W_P:
                 paragraphs.append(self._paragraph(element, location))
             else:
-                for tr in _iter_content(element, (W_TR,)):
-                    for tc in _iter_content(tr, (W_TC,)):
-                        paragraphs.extend(self._cell_paragraphs(tc, location))
-        return paragraphs
+                self._table_count += 1
+                if self._reject_nested_tables:
+                    raise NestedTableDetected([f"innere Tabelle {self._table_count}: {location}"])
+                nested_tables.append(self._table(element, self._table_count))
+        return paragraphs, nested_tables
 
     def _paragraph(self, p: Any, location: str) -> SourceParagraph:
         style_element = p.find(f"{qn('w:pPr')}/{qn('w:pStyle')}")
         style_id = style_element.get(W_VAL) if style_element is not None else None
         has_outline = p.find(f"{qn('w:pPr')}/{qn('w:outlineLvl')}") is not None
+        is_heading = has_outline or self._is_heading_style(style_id)
         segments: list[Segment] = []
-        self._walk_inline(p, segments, location, floating=False)
+        self._walk_inline(
+            p,
+            segments,
+            location,
+            floating=False,
+            paragraph_style_id=style_id,
+            paragraph_is_heading=is_heading,
+        )
         prefix = self._paragraph_prefix(p, segments, location)
         if prefix:
             segments.insert(0, prefix)
+        if is_heading:
+            segments = [TextRun(segment.text) if isinstance(segment, TextRun) else segment for segment in segments]
         return SourceParagraph(
             segments=_merge_text_segments(segments),
             style_id=style_id,
-            is_heading=has_outline or self._is_heading_style(style_id),
+            is_heading=is_heading,
         )
 
     def _walk_inline(
@@ -251,6 +316,12 @@ class BodyTraversal:
         *,
         floating: bool,
         font: str | None = None,
+        bold: bool = False,
+        italic: bool = False,
+        underline: bool = False,
+        color: str | None = None,
+        paragraph_style_id: str | None = None,
+        paragraph_is_heading: bool = False,
     ) -> None:
         for child in element:
             tag = child.tag
@@ -275,19 +346,40 @@ class BodyTraversal:
                     value = checked.get(W14_VAL, "1").casefold() if checked is not None else "0"
                     segments.append(CheckboxRef(checked is not None and value not in {"0", "false", "off"}))
                 else:
-                    self._walk_inline(child, segments, location, floating=floating, font=font)
+                    self._walk_inline(child, segments, location, floating=floating, font=font, bold=bold, italic=italic, underline=underline, color=color, paragraph_style_id=paragraph_style_id, paragraph_is_heading=paragraph_is_heading)
             elif tag == W_R:
                 run_properties = child.find(W_RPR)
                 fonts = run_properties.find(W_R_FONTS) if run_properties is not None else None
                 run_font = None
                 if fonts is not None:
                     run_font = fonts.get(W_ASCII) or fonts.get(W_HANSI)
-                self._walk_inline(child, segments, location, floating=floating, font=run_font or font)
+                run_bold = _on(run_properties, W_B, bold)
+                run_italic = _on(run_properties, W_I, italic)
+                underline_element = run_properties.find(W_U) if run_properties is not None else None
+                run_underline = underline_element is not None and underline_element.get(W_VAL, "single") != "none"
+                run_style = run_properties.find(W_RSTYLE) if run_properties is not None else None
+                run_style_id = run_style.get(W_VAL) if run_style is not None else None
+                run_color = self._effective_run_color(run_properties, run_style_id, paragraph_style_id)
+                if run_color is not None and not paragraph_is_heading:
+                    self._warn_unsupported_text_color(location, run_color)
+                self._walk_inline(
+                    child,
+                    segments,
+                    location,
+                    floating=floating,
+                    font=run_font or font,
+                    bold=run_bold,
+                    italic=run_italic,
+                    underline=run_underline or underline,
+                    color=run_color,
+                    paragraph_style_id=paragraph_style_id,
+                    paragraph_is_heading=paragraph_is_heading,
+                )
             elif tag == W_T:
                 if child.text:
-                    self._append_run_text(child.text, segments, font, location)
+                    self._append_run_text(child.text, segments, font, location, bold, italic, underline, color)
             elif tag in (W_TAB, W_PTAB):
-                segments.append("\t")
+                segments.append("    ")
             elif tag in (W_BR, W_CR):
                 segments.append("\n")
             elif tag == W_NO_BREAK_HYPHEN:
@@ -295,13 +387,22 @@ class BodyTraversal:
             elif tag == MC_ALTERNATE_CONTENT:
                 self._walk_alternate_content(child, segments, location, floating=floating)
             elif tag in (W_DRAWING, W_PICT, W_OBJECT):
+                if tag == W_OBJECT:
+                    ole = next((node for node in child.iter() if node.tag == O_OLE_OBJECT), None)
+                    if ole is not None:
+                        prog_id = ole.get("ProgID") or ""
+                        if self._is_embedded_word(ole.get(R_ID), prog_id):
+                            raise EmbeddedWordDocumentDetected(location, prog_id)
                 self._walk_graphic(child, segments, location, floating=floating)
             else:
-                self._walk_inline(child, segments, location, floating=floating, font=font)
+                self._walk_inline(child, segments, location, floating=floating, font=font, bold=bold, italic=italic, underline=underline, color=color, paragraph_style_id=paragraph_style_id, paragraph_is_heading=paragraph_is_heading)
 
-    def _append_run_text(self, text: str, segments: list[Segment], font: str | None, location: str) -> None:
+    def _append_run_text(
+        self, text: str, segments: list[Segment], font: str | None, location: str,
+        bold: bool, italic: bool, underline: bool, color: str | None,
+    ) -> None:
         if not font or not font.casefold().startswith("wingdings"):
-            _append_text_with_checkboxes(text, segments)
+            _append_text_with_checkboxes(text, segments, bold, italic, underline, color)
             return
         buffer = ""
         for character in text:
@@ -317,13 +418,11 @@ class BodyTraversal:
                 if buffer:
                     segments.append(buffer)
                     buffer = ""
-                replacement = f"[Wingdings U+{ord(character):04X}]"
-                segments.append(replacement)
                 self._warn_unknown_wingdings(location, ord(character))
             else:
                 buffer += glyph
         if buffer:
-            segments.append(buffer)
+            _append_styled_text(buffer, segments, bold, italic, underline, color)
 
     def _append_symbol(self, symbol: Any, segments: list[Segment], location: str) -> None:
         font = (symbol.get(W_FONT) or "").strip()
@@ -336,11 +435,11 @@ class BodyTraversal:
         if glyph is not None:
             segments.append(glyph)
             return
-        replacement = f"[{font or 'Word-Symbol'} U+{codepoint:04X}]"
-        segments.append(replacement)
         if font.casefold().startswith("wingdings"):
             self._warn_unknown_wingdings(location, codepoint)
         else:
+            replacement = f"[Word-Symbol U+{codepoint:04X}]"
+            segments.append(replacement)
             self._warnings.append(
                 Issue(code="unsupported_word_symbol", message=f"{location}: Nicht unterstütztes Word-Symbol {replacement}.")
             )
@@ -349,7 +448,51 @@ class BodyTraversal:
         self._warnings.append(
             Issue(
                 code="unsupported_wingdings_glyph",
-                message=f"{location}: Unbekanntes Wingdings-Zeichen U+{codepoint:04X}; als Textmarkierung übernommen.",
+                message=f"{location}: Unbekanntes Wingdings-Zeichen U+{codepoint:04X}; Symbol ausgelassen.",
+            )
+        )
+
+    def _effective_run_color(self, run_properties: Any, run_style_id: str | None, paragraph_style_id: str | None) -> str | None:
+        color = run_properties.find(W_COLOR) if run_properties is not None else None
+        if color is not None:
+            value = (color.get(W_VAL) or "").casefold()
+            if value not in {"", "auto", "000000"}:
+                return value
+            theme = color.get(qn("w:themeColor"))
+            if theme:
+                return f"theme:{theme}"
+            return None
+        for style_id in (run_style_id, paragraph_style_id):
+            current = style_id
+            seen: set[str] = set()
+            while current and current not in seen and self._styles is not None:
+                seen.add(current)
+                style = next((item for item in self._styles.findall(W_STYLE) if item.get(W_STYLE_ID) == current), None)
+                if style is None:
+                    break
+                style_run_properties = style.find(W_RPR)
+                style_color = style_run_properties.find(W_COLOR) if style_run_properties is not None else None
+                if style_color is not None:
+                    value = (style_color.get(W_VAL) or "").casefold()
+                    if value not in {"", "auto", "000000"}:
+                        return value
+                    theme = style_color.get(qn("w:themeColor"))
+                    if theme:
+                        return f"theme:{theme}"
+                    break
+                based_on = style.find(W_BASED_ON)
+                current = based_on.get(W_VAL) if based_on is not None else None
+        return None
+
+    def _warn_unsupported_text_color(self, location: str, color: str) -> None:
+        key = (location, color)
+        if key in self._warned_text_colors:
+            return
+        self._warned_text_colors.add(key)
+        self._warnings.append(
+            Issue(
+                code="unsupported_text_color",
+                message=f"{location}: Word-Textfarbe '{color}' wurde nicht in Jira-Markup übertragen; Jira-Farbunterstützung ist für diese Instanz nicht verifiziert.",
             )
         )
 
@@ -368,22 +511,18 @@ class BodyTraversal:
         num_id_element = num_properties.find(W_NUM_ID) if num_properties is not None else None
         level_element = num_properties.find(W_ILVL) if num_properties is not None else None
         num_id = _int_value(num_id_element, W_VAL, default=-1)
-        level = max(0, _int_value(level_element, W_VAL, default=0))
+        level = max(0, _int_value(level_element, W_VAL, default=0), _style_list_level(style_id))
+        _strip_leading_indentation(segments)
         definition = self._list_definition(num_id, level, style_id)
         if definition is not None:
-            num_id, level, number_format, level_text, font, start, list_indent = definition
+            num_id, resolved_level, number_format, level_text, font, start, list_indent = definition
+            level = max(level, resolved_level, _style_list_level(style_id))
             marker = self._list_marker(num_id, level, number_format, level_text, font, start, location)
-            indent_level = max(level, max(0, (list_indent - 360 + 359) // 360))
+            list_marker = "*" if number_format == "bullet" else "#"
+            marker = list_marker * (level + 1)
         else:
             marker = ""
-            indent = properties.find(W_IND) if properties is not None else None
-            left_twips = _int_value(indent, W_LEFT, default=0)
-            indent_level = (left_twips + 359) // 360 if left_twips > 0 else 0
-
-        leading_level = _strip_leading_indentation(segments)
-        indent_level = max(indent_level, leading_level)
-        hierarchy = "↳ " * min(indent_level, 8)
-        return f"{hierarchy}{marker} " if marker else hierarchy
+        return f"{marker} " if marker else ""
 
     def _list_definition(
         self, num_id: int, level: int, style_id: str | None
@@ -555,6 +694,15 @@ def _merge_text_segments(segments: list[Segment]) -> list[Segment]:
     for segment in segments:
         if isinstance(segment, str) and merged and isinstance(merged[-1], str):
             merged[-1] = merged[-1] + segment
+        elif (
+            isinstance(segment, TextRun)
+            and merged
+            and isinstance(merged[-1], TextRun)
+            and (segment.bold, segment.italic, segment.underline, segment.color)
+            == (merged[-1].bold, merged[-1].italic, merged[-1].underline, merged[-1].color)
+        ):
+            previous = merged[-1]
+            merged[-1] = TextRun(previous.text + segment.text, segment.bold, segment.italic, segment.underline, segment.color)
         else:
             merged.append(segment)
     return merged
@@ -580,7 +728,14 @@ def _append_symbol_checkbox(symbol: Any, segments: list[Segment]) -> bool:
     return False
 
 
-def _append_text_with_checkboxes(text: str, segments: list[Segment]) -> None:
+def _append_text_with_checkboxes(
+    text: str,
+    segments: list[Segment],
+    bold: bool = False,
+    italic: bool = False,
+    underline: bool = False,
+    color: str | None = None,
+) -> None:
     buffer = ""
     for character in text:
         checked = _CHECKBOX_GLYPHS.get(character)
@@ -588,11 +743,30 @@ def _append_text_with_checkboxes(text: str, segments: list[Segment]) -> None:
             buffer += character
             continue
         if buffer:
-            segments.append(buffer)
+            _append_styled_text(buffer, segments, bold, italic, underline, color)
             buffer = ""
         segments.append(CheckboxRef(checked))
     if buffer:
-        segments.append(buffer)
+        _append_styled_text(buffer, segments, bold, italic, underline, color)
+
+
+def _append_styled_text(
+    text: str, segments: list[Segment], bold: bool, italic: bool, underline: bool, color: str | None = None
+) -> None:
+    if text:
+        segments.append(TextRun(text, bold, italic, underline, color) if bold or italic or underline or color else text)
+
+
+def _on(properties: Any, tag: str, inherited: bool) -> bool:
+    element = properties.find(tag) if properties is not None else None
+    return inherited if element is None else element.get(W_VAL, "1").casefold() not in {"0", "false", "off"}
+
+
+def _style_list_level(style_id: str | None) -> int:
+    if not style_id:
+        return 0
+    match = re.fullmatch(r"(?:ListBullet|ListNumber)(\d+)", style_id, re.IGNORECASE)
+    return max(0, int(match.group(1)) - 1) if match else 0
 
 
 def _int_attribute(element: Any, *, default: int) -> int:
